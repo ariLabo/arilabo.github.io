@@ -36,19 +36,21 @@ jobs:
           hash_pattern = re.compile(r'(?:%20|\s+)[0-9a-f]{32}', re.IGNORECASE)
 
           # ==========================================
-          # 📋 [安全な設定] aタグ単位でリンクをキャッチして綺麗に変換するルール
+          # 🛡️ 安全かつ正確にリンクタグやURLを置き換える関数
           # ==========================================
-          def process_link_tags(content):
-              # Notionのエクスポートで生成される <a href="URL">URL</a> またはそれに準ずるタグを正確に捕まえる
+          def process_html_content(content):
+              # 1. まず <a href="...">...</a> タグを安全にキャッチして処理
               link_pattern = re.compile(r'<a\s+[^>]*?href="([^"]+?)"[^>]*>(.*?)</a>', re.DOTALL | re.IGNORECASE)
 
-              def replace_tag(match):
-                  href_val = match.group(1).strip()
-                  
-                  # ハッシュの掃除
-                  clean_href = hash_pattern.sub('', href_val)
+              def replace_link(match):
+                  # 改行や空白を完全にトリムして純粋なURLを取り出す
+                  raw_href = match.group(1)
+                  clean_href = hash_pattern.sub('', raw_href).strip()
 
-                  # 1. YouTubeの判定
+                  # カッコや余分なクォートが混ざっていたら削る
+                  clean_href = clean_href.split('"')[0].split("'")[0]
+
+                  # ① YouTubeの判定 (youtu.be または youtube.com)
                   yt_match = re.search(r'(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/ \s<]{11})', clean_href)
                   if yt_match:
                       vid = yt_match.group(1)
@@ -58,7 +60,7 @@ jobs:
                       </div>
                       '''
 
-                  # 2. Google Mapsの判定
+                  # ② Google Mapsの判定
                   if any(domain in clean_href for domain in ['google.com/maps', 'goo.gl/maps', 'maps.app.goo.gl']):
                       return f'''
                       <div style="width: 100%; height: 400px; margin: 20px 0;">
@@ -66,7 +68,7 @@ jobs:
                       </div>
                       '''
 
-                  # 3. 通常のWebリンク（CSSや画像、内部リンク以外）のカード化
+                  # ③ 一般的なWebリンク（CSSや画像、内部リンク以外）のカード化
                   if clean_href.startswith('http://') or clean_href.startswith('https://'):
                       if any(clean_href.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.css', '.js']):
                           return match.group(0) # そのまま維持
@@ -82,10 +84,49 @@ jobs:
                       </div>
                       '''
 
-                  # それ以外のリンク（内部リンクやファイルリンクなど）はそのまま返す
+                  # 該当しない場合は元のタグをそのまま返す
                   return match.group(0)
 
-              return link_pattern.sub(replace_tag, content)
+              content = link_pattern.sub(replace_link, content)
+
+              # 2. 念のため、<a>タグの外側にプレーンテキストとして残っているURLがあればカード化
+              # (すでにHTMLタグ内にあるものは除外)
+              plain_url_pattern = re.compile(r'(?<!href=")(?<!src=")(https?://[^\s<>"]+)', re.IGNORECASE)
+              
+              def replace_plain_url(match):
+                  url = match.group(0).strip()
+                  if any(url.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.css', '.js']):
+                      return url
+                  
+                  # YouTubeやMapsの単体テキストURLの場合もここで拾えるようにする
+                  yt_match = re.search(r'(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/ \s<]{11})', url)
+                  if yt_match:
+                      vid = yt_match.group(1)
+                      return f'''
+                      <div style="position: relative; width: 100%; height: 0; padding-bottom: 56.25%; margin: 20px 0;">
+                          <iframe src="https://www.youtube.com/embed/{vid}" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0;" allowfullscreen></iframe>
+                      </div>
+                      '''
+                  if any(domain in url for domain in ['google.com/maps', 'goo.gl/maps', 'maps.app.goo.gl']):
+                      return f'''
+                      <div style="width: 100%; height: 400px; margin: 20px 0;">
+                          <iframe src="{url}" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy"></iframe>
+                      </div>
+                      '''
+
+                  return f'''
+                  <div style="border: 1px solid #e1e4e8; border-radius: 8px; padding: 15px; margin: 20px 0; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                      <a href="{url}" target="_blank" style="text-decoration: none; color: #0366d6; font-weight: bold; font-size: 1.1em; display: block; margin-bottom: 5px;">
+                          🔗 {url}
+                      </a>
+                      <div style="font-size: 0.85em; color: #586069; word-break: break-all;">
+                          {url}
+                      </div>
+                  </div>
+                  '''
+
+              content = plain_url_pattern.sub(replace_plain_url, content)
+              return content
 
           # 0. 既存ファイル名のセットを収集
           all_existing_htmls = set()
@@ -96,7 +137,7 @@ jobs:
                   if file.endswith('.html'):
                       all_existing_htmls.add(file)
 
-          # 1. 既存のHTMLファイルをスキャンしてレイアウトを崩さずにリンクを置換
+          # 1. 既存のHTMLファイルをスキャン
           for root, dirs, files in os.walk('.'):
               if '.github' in root or 'temp_extracted' in root:
                   continue
@@ -107,7 +148,7 @@ jobs:
                           content = f.read()
 
                       content = hash_pattern.sub('', content)
-                      updated_content = process_link_tags(content)
+                      updated_content = process_html_content(content)
 
                       if content != updated_content:
                           with open(file_path, 'w', encoding='utf-8') as f:
@@ -139,7 +180,7 @@ jobs:
                           new_path = os.path.join(root, new_d)
                           os.rename(old_path, new_path)
 
-              # 解凍されたHTMLにも安全なリンク置換を適用
+              # 解凍されたHTMLにも安全な処理を適用
               for root, dirs, files in os.walk(temp_dir):
                   for file in files:
                       if file.endswith('.html'):
@@ -148,7 +189,7 @@ jobs:
                               content = f.read()
                           
                           content = hash_pattern.sub('', content)
-                          updated_content = process_link_tags(content)
+                          updated_content = process_html_content(content)
                           
                           if content != updated_content:
                               with open(file_path, 'w', encoding='utf-8') as f:
@@ -223,7 +264,7 @@ jobs:
 
           with open('index.html', 'w', encoding='utf-8') as f:
               f.write(index_content)
-          print("Successfully synced with safe link processing!")
+          print("Successfully synced with robust URL sanitization and layout preservation!")
           EOF
 
       - name: Commit and push changes
@@ -231,5 +272,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff --staged --quiet || git commit -m "Sync: safe link tag replacement preserving layout"
+          git diff --staged --quiet || git commit -m "Sync: robust URL sanitization and layout preservation"
           git push
