@@ -41,7 +41,7 @@ jobs:
           hash_pattern = re.compile(r'(?:%20|\s+)[0-9a-f]{32}', re.IGNORECASE)
 
           # ==========================================
-          # 🎨 記事全体を包み込む共通テンプレートHTML
+          # 🎨 記事全体の共通テンプレートHTML
           # ==========================================
           def render_template(title, body_html):
               return f'''<!DOCTYPE html>
@@ -74,7 +74,6 @@ jobs:
                       color: #111;
                   }}
                   p {{ margin: 1em 0; }}
-                  /* YouTubeレスポンシブ埋め込み */
                   .embed-youtube {{
                       position: relative;
                       width: 100%;
@@ -90,7 +89,6 @@ jobs:
                       width: 100%; height: 100%;
                       border: 0;
                   }}
-                  /* Google Maps埋め込み */
                   .embed-map {{
                       width: 100%;
                       height: 400px;
@@ -111,26 +109,13 @@ jobs:
                       text-decoration: none;
                   }}
                   .map-link a:hover {{ text-decoration: underline; }}
-                  /* リンクカード */
-                  .link-card {{
-                      border: 1px solid #e1e4e8;
-                      border-radius: 8px;
-                      padding: 15px 20px;
-                      margin: 25px 0;
-                      background: #fff;
-                      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-                      transition: box-shadow 0.2s;
-                  }}
-                  .link-card:hover {{
-                      box-shadow: 0 4px 8px rgba(0,0,0,0.08);
-                  }}
-                  .link-card a {{
-                      text-decoration: none;
-                      color: #0366d6;
-                      font-weight: bold;
-                      font-size: 1.05em;
-                      display: block;
+                  .source {{
+                      border: 1px solid #ddd;
+                      border-radius: 6px;
+                      padding: 1.2em;
                       word-break: break-all;
+                      margin: 1.25em 0;
+                      background: #fafafa;
                   }}
                   .back-link {{
                       display: inline-block;
@@ -141,6 +126,20 @@ jobs:
                       font-size: 0.9em;
                   }}
                   .back-link:hover {{ color: #000; }}
+                  /* 記事内のハッシュタグリンクのスタイル */
+                  .content a.article-tag {{
+                      color: #0969da;
+                      background: #eef2f5;
+                      padding: 2px 6px;
+                      border-radius: 4px;
+                      text-decoration: none;
+                      font-size: 0.9em;
+                      font-weight: normal;
+                  }}
+                  .content a.article-tag:hover {{
+                      background: #d0d7de;
+                      text-decoration: underline;
+                  }}
               </style>
           </head>
           <body>
@@ -156,33 +155,35 @@ jobs:
           '''
 
           # ==========================================
-          # 🛠️ HTMLのリンク・テキストを綺麗にカード化する関数
+          # 🛠️ マップ・YouTube変換 ＆ 本文ハッシュタグのリンク化
           # ==========================================
           def transform_content(html_content):
               soup = BeautifulSoup(html_content, 'html.parser')
 
-              # 1. 既存の <a> タグやテキスト内のURLをチェックして置換する
-              # すべての a タグを走査
-              for a_tag in soup.find_all('a', href=True):
+              # 1. 既存のリンク（YouTubeやマップなど）の処理
+              for a_tag in list(soup.find_all('a', href=True)):
+                  if not a_tag.parent:
+                      continue
+                  
                   href = a_tag['href']
                   clean_href = hash_pattern.sub('', href).strip()
 
-                  # すでにカードやiframeに囲まれている親要素があればスキップ（重複防止）
-                  if a_tag.find_parent(class_=['link-card', 'embed-youtube', 'embed-map']):
-                      continue
-
-                  # ① YouTube
+                  # YouTube埋め込み
                   yt_match = re.search(r'(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/ \s<]{11})', clean_href)
                   if yt_match:
                       vid = yt_match.group(1)
                       new_div = soup.new_tag('div')
                       new_div['class'] = 'embed-youtube'
-                      new_div.clear()
                       new_div.append(BeautifulSoup(f'<iframe src="https://www.youtube.com/embed/{vid}" allowfullscreen></iframe>', 'html.parser'))
-                      a_tag.replace_with(new_div)
+                      
+                      parent_figure = a_tag.find_parent('figure')
+                      if parent_figure:
+                          parent_figure.replace_with(new_div)
+                      else:
+                          a_tag.replace_with(new_div)
                       continue
 
-                  # ② Google Mapsの判定 -> 座標を抽出して正しいiframe埋め込みに変換
+                  # Google Maps埋め込み
                   if any(domain in clean_href for domain in ['google.com/maps', 'goo.gl/maps', 'maps.app.goo.gl', 'maps.google.com']):
                       wrapper = soup.new_tag('div')
                       
@@ -190,13 +191,11 @@ jobs:
                           wrapper['class'] = 'source'
                           wrapper.append(BeautifulSoup(f'🗺️ <span>Googleマップで確認する</span><br><a href="{clean_href}" target="_blank">{clean_href}</a>', 'html.parser'))
                       else:
-                          # URLから緯度・経度（@lat,lng）を抽出する
                           latlng_match = re.search(r'@([0-9\.-]+),([0-9\.-]+)', clean_href)
                           if latlng_match:
                               lat, lng = latlng_match.groups()
                               query_val = f"{lat},{lng}"
                           else:
-                              # 緯度経度がない場合はURLエンコードされた場所名や全体をフォールバックとして使用
                               query_val = clean_href
 
                           map_div = soup.new_tag('div')
@@ -217,26 +216,28 @@ jobs:
                           a_tag.replace_with(wrapper)
                       continue
 
-
-                  # ③ 一般リンク (アセット系ファイルやCSSなどはそのまま)
-                  if any(clean_href.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.css', '.js']):
-                      continue
-
-                  if clean_href.startswith('http://') or clean_href.startswith('https://'):
-                      card_div = soup.new_tag('div')
-                      card_div['class'] = 'link-card'
-                      card_div.append(BeautifulSoup(f'<a href="{clean_href}" target="_blank">🔗 {clean_href}</a>', 'html.parser'))
-                      a_tag.replace_with(card_div)
-
-              # 本文エリア（.page-body または bodyの中身）を取り出す
+              # 本文エリアの取得
               body_node = soup.find('div', class_='page-body')
               if not body_node:
                   body_node = soup.find('body')
               
               if body_node:
-                  # 余計なNotion固有のラッパー要素の不要な属性を掃除
-                  return str(body_node)
-              return str(soup)
+                  body_html = str(body_node)
+              else:
+                  body_html = str(soup)
+
+              # 2. 本文中のテキストにある #タグ を index.html へのリンクに置換
+              # （すでに <a> タグの中にあるものは除外するため、単純なテキスト部分を置換）
+              def tag_replacer(match):
+                  tag_name = match.group(1)
+                  # 記事内から index.html への相対パス（Posts/YYYYMMDD/... なので "../../index.html"）
+                  return f'<a href="../../index.html?tag={tag_name}" class="article-tag">#{tag_name}</a>'
+
+              # 正規表現で #タグ（スペースや文末の手前まで）を抽出して置換
+              tag_pattern = re.compile(r'#([a-zA-Z0-9_\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]+)(?![^<]*>)')
+              processed_body = tag_pattern.sub(tag_replacer, body_html)
+
+              return processed_body
 
           # ==========================================
           # ファイルの走査・ZIP展開処理
@@ -251,7 +252,6 @@ jobs:
                       zip_ref.extractall(temp_dir)
                   os.remove(z_file)
 
-              # ハッシュ名の除去
               for root, dirs, files in os.walk(temp_dir, topdown=False):
                   for file in files:
                       if hash_pattern.search(file):
@@ -264,7 +264,6 @@ jobs:
               target_date_dir = os.path.join(posts_dir, today_str)
               os.makedirs(target_date_dir, exist_ok=True)
 
-              # NotionエクスポートHTMLをテンプレートに流し込んで再保存
               for root, dirs, files in os.walk(temp_dir):
                   for file in files:
                       if file.endswith('.html'):
@@ -272,18 +271,13 @@ jobs:
                           with open(file_path, 'r', encoding='utf-8') as f:
                               raw_html = f.read()
                           
-                          # タイトルの取得
                           title_match = re.search(r'<title>(.*?)</title>', raw_html, re.IGNORECASE)
                           title = title_match.group(1) if title_match else file.replace('.html', '')
                           title = hash_pattern.sub('', title).strip()
 
-                          # 本文の変換処理
                           processed_body = transform_content(raw_html)
-                          
-                          # テンプレート適用済みHTMLを生成
                           final_html = render_template(title, processed_body)
 
-                          # 保存先パス
                           rel_sub_path = os.path.relpath(root, temp_dir)
                           dest_sub_dir = os.path.join(target_date_dir, rel_sub_path) if rel_sub_path != '.' else target_date_dir
                           os.makedirs(dest_sub_dir, exist_ok=True)
@@ -294,7 +288,6 @@ jobs:
                           with open(dest_file_path, 'w', encoding='utf-8') as f:
                               f.write(final_html)
 
-              # 画像などのアセットフォルダも移動
               for item in os.listdir(temp_dir):
                   src_item = os.path.join(temp_dir, item)
                   if os.path.isdir(src_item):
@@ -307,26 +300,40 @@ jobs:
                   shutil.rmtree(temp_dir)
 
           # ==========================================
-          # index.html の生成
+          # 📚 index.html の生成（URLパラメータ対応・自動タグ抽出）
           # ==========================================
           html_files = []
+          all_tags = set()
+          article_data = []
+
           for root, dirs, files in os.walk('.'):
               if '.github' in root or 'temp_extracted' in root:
                   continue
               for file in files:
-                  if file.endswith('.html') and file != 'index.html':
-                      rel_path = os.path.relpath(os.path.join(root, file), '.')
-                      rel_path = rel_path.replace('\\', '/')
-                      title = file.replace('.html', '')
-                      try:
-                          with open(os.path.join(root, file), 'r', encoding='utf-8') as f:
-                              content = f.read()
-                              match = re.search(r'<title>(.*?)</title>', content, re.IGNORECASE)
-                              if match:
-                                  title = match.group(1)
-                      except Exception:
-                          pass
-                      html_files.append((rel_path, title))
+                if file.endswith('.html') and file != 'index.html':
+                    rel_path = os.path.relpath(os.path.join(root, file), '.')
+                    rel_path = rel_path.replace('\\', '/')
+                    title = file.replace('.html', '')
+                    content = ""
+                    try:
+                        with open(os.path.join(root, file), 'r', encoding='utf-8') as f:
+                            content = f.read()
+                            match = re.search(r'<title>(.*?)</title>', content, re.IGNORECASE)
+                            if match:
+                                title = match.group(1)
+                    except Exception:
+                        pass
+                    
+                    found_tags = re.findall(r'#([a-zA-Z0-9_\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]+)', content)
+                    tag_list = list(set(found_tags))
+                    for t in tag_list:
+                        all_tags.add(t)
+
+                    article_data.append({
+                        'path': rel_path,
+                        'title': title,
+                        'tags': tag_list
+                    })
 
           index_content = """<!DOCTYPE html>
           <html lang="ja">
@@ -338,7 +345,11 @@ jobs:
                   body { font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; background-color: #fcfcfc; color: #333; }
                   .container { background: #fff; padding: 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
                   h1 { border-bottom: 2px solid #eaeaea; padding-bottom: 12px; margin-top: 0; color: #111; }
-                  ul { padding-left: 20px; }
+                  .search-box { width: 100%; padding: 12px; font-size: 1rem; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 15px; box-sizing: border-box; }
+                  .tag-container { margin-bottom: 25px; display: flex; flex-wrap: wrap; gap: 8px; }
+                  .tag-badge { background: #eef2f5; color: #333; padding: 6px 12px; border-radius: 20px; font-size: 0.85em; text-decoration: none; cursor: pointer; border: 1px solid #d0d7de; transition: background 0.2s; }
+                  .tag-badge:hover, .tag-badge.active { background: #0969da; color: #fff; border-color: #0969da; }
+                  ul { padding-left: 20px; list-style: none; }
                   li { margin: 12px 0; }
                   a { color: #0066cc; text-decoration: none; font-weight: bold; }
                   a:hover { text-decoration: underline; }
@@ -348,13 +359,69 @@ jobs:
           <body>
               <div class="container">
                   <h1>📚 教学・Pythonログ一覧</h1>
-                  <ul>
+                  <input type="text" id="searchInput" class="search-box" placeholder="🔍 記事をキーワード検索..." onkeyup="filterArticles()">
           """
 
-          for path, title in sorted(html_files, reverse=True):
-              index_content += f'        <li><a href="{path}">{title}</a><span class="path">({path})</span></li>\n'
+          index_content += '        <div class="tag-container">\n'
+          index_content += '            <span class="tag-badge active" onclick="filterByTag(\'ALL\')">すべて</span>\n'
+          for tag in sorted(all_tags):
+              index_content += f'            <span class="tag-badge" onclick="filterByTag(\'{tag}\')">#{tag}</span>\n'
+          index_content += '        </div>\n'
 
-          index_content += """    </ul>
+          index_content += '        <ul id="articleList">\n'
+          for item in sorted(article_data, key=lambda x: x['path'], reverse=True):
+              tags_str = ",".join(item['tags'])
+              index_content += f'        <li class="article-item" data-tags="{tags_str}"><a href="{item["path"]}">{item["title"]}</a><span class="path">({item["path"]})</span></li>\n'
+          index_content += '    </ul>\n'
+
+          # URLパラメータ（?tag=〇〇）を読み取って初期選択するJavaScript
+          index_content += """
+              <script>
+                  let currentTag = 'ALL';
+
+                  function filterArticles() {
+                      let input = document.getElementById('searchInput').value.toLowerCase();
+                      let items = document.getElementsByClassName('article-item');
+                      
+                      for (let i = 0; i < items.length; i++) {
+                          let text = items[i].textContent.toLowerCase();
+                          let tags = items[i].getAttribute('data-tags');
+                          
+                          let matchesSearch = text.includes(input);
+                          let matchesTag = (currentTag === 'ALL' || tags.split(',').includes(currentTag));
+                          
+                          if (matchesSearch && matchesTag) {
+                              items[i].style.display = "";
+                          } else {
+                              items[i].style.display = "none";
+                          }
+                      }
+                  }
+
+                  function filterByTag(tagName) {
+                      currentTag = tagName;
+                      
+                      let badges = document.getElementsByClassName('tag-badge');
+                      for (let b of badges) {
+                          if (b.textContent === (tagName === 'ALL' ? 'すべて' : '#' + tagName)) {
+                              b.classList.add('active');
+                          } else {
+                              b.classList.remove('active');
+                          }
+                      }
+                      
+                      filterArticles();
+                  }
+
+                  // ページ読み込み時にURLパラメータ（?tag=xxx）をチェックして自動で絞り込む
+                  window.onload = function() {
+                      const urlParams = new URLSearchParams(window.location.search);
+                      const tagParam = urlParams.get('tag');
+                      if (tagParam) {
+                          filterByTag(tagParam);
+                      }
+                  };
+              </script>
               </div>
           </body>
           </html>
@@ -362,7 +429,7 @@ jobs:
 
           with open('index.html', 'w', encoding='utf-8') as f:
               f.write(index_content)
-          print("Successfully templated and fixed all links and embeds!")
+          print("Successfully updated index and article tags!")
           EOF
 
       - name: Commit and push changes
@@ -370,5 +437,6 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff --staged --quiet || git commit -m "Refactor: apply unified HTML template and BeautifulSoup parsing for reliable cards"
+          git diff --staged --quiet || git commit -m "Update: auto-link body hashtags to index.html with query parameter filtering"
           git push
+
