@@ -23,9 +23,9 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install beautifulsoup4
+          pip import beautifulsoup4 || pip install beautifulsoup4
 
-      - name: Clean old posts, extract ZIP, and template HTMLs
+      - name: Extract ZIP, update Posts, and generate clean index
         run: |
           python - << 'EOF'
           import os
@@ -36,15 +36,12 @@ jobs:
           from bs4 import BeautifulSoup
 
           posts_dir = 'Posts'
-          hash_pattern = re.compile(r'(?:%20|\s+)[0-9a-f]{32}', re.IGNORECASE)
-
-          # 古いPostsのクリーンアップ
-          if os.path.exists(posts_dir):
-              shutil.rmtree(posts_dir)
           os.makedirs(posts_dir, exist_ok=True)
 
+          hash_pattern = re.compile(r'(?:%20|\s+)[0-9a-f]{32}', re.IGNORECASE)
+
           # ==========================================
-          # 🎨 記事全体の共通テンプレートHTML
+          # 🎨 記事全体の共通テンプレートHTML（ミニサムネイル付きリンク対応）
           # ==========================================
           def render_template(title, body_html):
               return f'''<!DOCTYPE html>
@@ -195,18 +192,16 @@ jobs:
           '''
 
           # ==========================================
-          # 🛠️ リンクカードのミニサムネイル付き単純化・マップ・YouTube変換
+          # 🛠️ リンクカード整形・マップ・YouTube変換
           # ==========================================
           def transform_content(html_content):
               soup = BeautifulSoup(html_content, 'html.parser')
 
-              # 1. Notionのブックマークブロック（figure.bookmarked-page）をミニサムネイル付きリンクに置き換え
               for bookmark in list(soup.find_all('figure', class_='bookmarked-page')):
                   a_tag = bookmark.find('a', href=True)
                   if a_tag:
                       href = hash_pattern.sub('', a_tag['href']).strip()
                       
-                      # タイトルテキストの抽出
                       title_text = ""
                       text_divs = bookmark.find_all(['div', 'p', 'span'])
                       for td in text_divs:
@@ -217,7 +212,6 @@ jobs:
                       if not title_text:
                           title_text = href
 
-                      # サムネイル画像（faviconやOGP画像）の抽出
                       img_tag = bookmark.find('img')
                       thumb_src = ""
                       if img_tag and img_tag.get('src'):
@@ -243,7 +237,6 @@ jobs:
                   else:
                       bookmark.decompose()
 
-              # 2. その他の通常のリンクの処理（YouTubeやGoogleマップなど）
               for a_tag in list(soup.find_all('a', href=True)):
                   if not a_tag.parent:
                       continue
@@ -251,7 +244,6 @@ jobs:
                   href = a_tag['href']
                   clean_href = hash_pattern.sub('', href).strip()
 
-                  # YouTube埋め込み
                   yt_match = re.search(r'(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/ \s<]{11})', clean_href)
                   if yt_match:
                       vid = yt_match.group(1)
@@ -266,7 +258,6 @@ jobs:
                           a_tag.replace_with(new_div)
                       continue
 
-                  # Google Maps埋め込み
                   if any(domain in clean_href for domain in ['google.com/maps', 'goo.gl/maps', 'maps.app.goo.gl', 'maps.google.com']):
                       wrapper = soup.new_tag('div')
                       
@@ -320,7 +311,7 @@ jobs:
               return processed_body
 
           # ==========================================
-          # ファイルの走査・ZIP展開処理
+          # ファイルの走査・新規ZIP展開と反映
           # ==========================================
           temp_dir = 'temp_extracted'
           zip_files = [f for f in os.listdir('.') if f.endswith('.zip')]
@@ -373,61 +364,68 @@ jobs:
                   if os.path.isdir(src_item):
                       dst_item = os.path.join(target_date_dir, item)
                       if os.path.exists(dst_item):
-                          shutil.rmtree(dst_item)
-                      shutil.move(src_item, dst_item)
+                          # 既存の同名フォルダがある場合は中身を上書き・統合（既存記事を消さない）
+                          for sub_root, sub_dirs, sub_files in os.walk(src_item):
+                              rel_p = os.path.relpath(sub_root, src_item)
+                              target_sub_p = os.path.join(dst_item, rel_p) if rel_p != '.' else dst_item
+                              os.makedirs(target_sub_p, exist_ok=True)
+                              for sf in sub_files:
+                                  shutil.move(os.path.join(sub_root, sf), os.path.join(target_sub_p, sf))
+                          shutil.rmtree(src_item)
+                      else:
+                          shutil.move(src_item, dst_item)
 
               if os.path.exists(temp_dir):
                   shutil.rmtree(temp_dir)
 
           # ==========================================
-          # 📚 index.html の生成
+          # 📚 index.html の生成（現在 Posts 内に存在する有効なHTMLファイルだけをスキャンしてリスト化）
           # ==========================================
-          html_files = []
-          all_tags = set()
           article_data = []
+          all_tags = set()
 
-          for root, dirs, files in os.walk('.'):
-              if '.github' in root or 'temp_extracted' in root:
-                  continue
-              for file in files:
-                if file.endswith('.html') and file != 'index.html':
-                    rel_path = os.path.relpath(os.path.join(root, file), '.')
-                    rel_path = rel_path.replace('\\', '/')
-                    title = file.replace('.html', '')
-                    raw_text = ""
-                    target_text = ""
-                    try:
-                        with open(os.path.join(root, file), 'r', encoding='utf-8') as f:
-                            content = f.read()
-                            soup_temp = BeautifulSoup(content, 'html.parser')
-                            
-                            match = re.search(r'<title>(.*?)</title>', content, re.IGNORECASE)
-                            if match:
-                                title = match.group(1)
-                            
-                            body_node = soup_temp.find('div', class_='page-body')
-                            if not body_node:
-                                body_node = soup_temp.find('body')
-                            
-                            target_text = str(body_node) if body_node else content
-                            raw_text = soup_temp.get_text(separator=' ', strip=True)
-                            raw_text = re.sub(r'\s+', ' ', raw_text).replace('"', '&quot;')
-                    except Exception:
-                        pass
-                    
-                    found_tags = re.findall(r'#([a-zA-Z0-9_\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]+)', target_text)
-                    tag_list = []
-                    for t in found_tags:
-                        if not re.fullmatch(r'[0-9a-fA-F]{3}|[0-9a-fA-F]{6}', t):
-                            tag_list.append(t)
-                            all_tags.add(t)
+          if os.path.exists(posts_dir):
+              for root, dirs, files in os.walk(posts_dir):
+                  for file in files:
+                      if file.endswith('.html'):
+                          full_path = os.path.join(root, file)
+                          rel_path = os.path.relpath(full_path, '.').replace('\\', '/')
+                          
+                          title = file.replace('.html', '')
+                          raw_text = ""
+                          target_text = ""
+                          try:
+                              with open(full_path, 'r', encoding='utf-8') as f:
+                                  content = f.read()
+                                  soup_temp = BeautifulSoup(content, 'html.parser')
+                                  
+                                  match = re.search(r'<title>(.*?)</title>', content, re.IGNORECASE)
+                                  if match:
+                                      title = match.group(1)
+                                  
+                                  body_node = soup_temp.find('div', class_='content')
+                                  if not body_node:
+                                      body_node = soup_temp.find('body')
+                                  
+                                  target_text = str(body_node) if body_node else content
+                                  raw_text = soup_temp.get_text(separator=' ', strip=True)
+                                  raw_text = re.sub(r'\s+', ' ', raw_text)
+                          except Exception:
+                              pass
+                          
+                          found_tags = re.findall(r'#([a-zA-Z0-9_\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]+)', target_text)
+                          tag_list = []
+                          for t in found_tags:
+                              if not re.fullmatch(r'[0-9a-fA-F]{3}|[0-9a-fA-F]{6}', t):
+                                  tag_list.append(t)
+                                  all_tags.add(t)
 
-                    article_data.append({
-                        'path': rel_path,
-                        'title': title,
-                        'tags': tag_list,
-                        'raw_text': raw_text
-                    })
+                          article_data.append({
+                              'path': rel_path,
+                              'title': title,
+                              'tags': tag_list,
+                              'raw_text': raw_text
+                          })
 
           index_content = """<!DOCTYPE html>
           <html lang="ja">
@@ -521,7 +519,7 @@ jobs:
 
           with open('index.html', 'w', encoding='utf-8') as f:
               f.write(index_content)
-          print("Successfully added mini-thumbnails to bookmark links!")
+          print("Successfully updated index based on active Posts while preserving existing files!")
           EOF
 
       - name: Commit and push changes
@@ -529,5 +527,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff --staged --quiet || git commit -m "Update: add mini-thumbnails to bookmark links"
+          git diff --staged --quiet || git commit -m "Update: sync index with existing Posts and keep safe from full deletion"
           git push
