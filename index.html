@@ -40,47 +40,29 @@
 
     <script>
         let currentTag = 'ALL';
-
         function filterArticles() {
             let input = document.getElementById('searchInput').value.toLowerCase();
             let items = document.getElementsByClassName('article-item');
-            
             for (let i = 0; i < items.length; i++) {
                 let searchTarget = items[i].getAttribute('data-content').toLowerCase();
                 let tags = items[i].getAttribute('data-tags');
-                
                 let matchesSearch = searchTarget.includes(input);
                 let matchesTag = (currentTag === 'ALL' || tags.split(',').includes(currentTag));
-                
-                if (matchesSearch && matchesTag) {
-                    items[i].style.display = "";
-                } else {
-                    items[i].style.display = "none";
-                }
+                items[i].style.display = (matchesSearch && matchesTag) ? "" : "none";
             }
         }
-
         function filterByTag(tagName) {
             currentTag = tagName;
-            
             let badges = document.getElementsByClassName('tag-badge');
             for (let b of badges) {
-                if (b.textContent === (tagName === 'ALL' ? 'すべて' : '#' + tagName)) {
-                    b.classList.add('active');
-                } else {
-                    b.classList.remove('active');
-                }
+                b.classList.toggle('active', b.textContent === (tagName === 'ALL' ? 'すべて' : '#' + tagName));
             }
-            
             filterArticles();
         }
-
         window.onload = function() {
             const urlParams = new URLSearchParams(window.location.search);
             const tagParam = urlParams.get('tag');
-            if (tagParam) {
-                filterByTag(tagParam);
-            }
+            if (tagParam) filterByTag(tagParam);
         };
     </script>
     </div>
