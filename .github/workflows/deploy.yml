@@ -1,0 +1,101 @@
+name: Deploy Notion Export ZIP
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Process ZIP and Generate Index
+        run: |
+          python - << 'EOF'
+          import os
+          import zipfile
+          import re
+          import shutil
+
+          # 1. ルートディレクトリにあるZIPファイルを探して自動解凍する
+          zip_files = [f for f in os.listdir('.') if f.endswith('.zip')]
+          for z_file in zip_files:
+              print(f"Extracting: {z_file}")
+              with zipfile.ZipFile(z_file, 'r') as zip_ref:
+                  zip_ref.extractall('.')
+              # 解凍が終わったZIPファイルは削除（リポジトリを汚さないため）
+              os.remove(z_file)
+
+          # 2. リポジトリ内のすべてのHTMLファイルをスキャン
+          html_files = []
+          for root, dirs, files in os.walk('.'):
+              if '.github' in root:
+                  continue
+              for file in files:
+                  if file.endswith('.html') and file != 'index.html':
+                      rel_path = os.path.relpath(os.path.join(root, file), '.')
+                      
+                      # ファイル名からタイトルを抽出（<title>タグがあればそれを優先）
+                      title = file.replace('.html', '')
+                      try:
+                          with open(os.path.join(root, file), 'r', encoding='utf-8') as f:
+                              content = f.read()
+                              match = re.search(r'<title>(.*?)</title>', content, re.IGNORECASE)
+                              if match:
+                                  title = match.group(1)
+                      except Exception:
+                          pass
+                      html_files.append((rel_path, title))
+
+          # 3. 最新の目次（index.html）を自動生成
+          index_content = """<!DOCTYPE html>
+          <html lang="ja">
+          <head>
+              <meta charset="UTF-8">
+              <title>Chamonchiのブログ / ログ一覧</title>
+              <style>
+                  body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; background-color: #f9f9f9; color: #333; }
+                  h1 { border-bottom: 2px solid #ddd; padding-bottom: 10px; }
+                  ul { padding-left: 20px; }
+                  li { margin: 12px 0; }
+                  a { color: #0066cc; text-decoration: none; font-weight: bold; }
+                  a:hover { text-decoration: underline; }
+                  .path { font-size: 0.85em; color: #666; margin-left: 8px; }
+              </style>
+          </head>
+          <body>
+              <h1>📚 Notionログ・記事一覧</h1>
+              <ul>
+          """
+
+          for path, title in sorted(html_files, reverse=True):
+              index_content += f'        <li><a href="{path}">{title}</a><span class="path">({path})</span></li>\n'
+
+          index_content += """    </ul>
+          </body>
+          </html>
+          """
+
+          with open('index.html', 'w', encoding='utf-8') as f:
+              f.write(index_content)
+          print("index.html generated successfully!")
+          EOF
+
+      - name: Commit and push changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git diff --staged --quiet || git commit -m "Auto-extract ZIP and update index.html"
+          git push
