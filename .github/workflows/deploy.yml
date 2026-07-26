@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Organize into Title Folders, Rename, and Generate Index
+      - name: Extract ZIP keeping structure, Rename, and Generate Index
         run: |
           python - << 'EOF'
           import os
@@ -42,72 +42,67 @@ jobs:
                   zip_ref.extractall(temp_dir)
               os.remove(z_file)
 
-          # ハッシュ値削除用の正規表現（半角スペース＋32文字）
+          # ハッシュ値削除用の正規表現（半角スペース＋32文字の16進数）
           hash_pattern = re.compile(r' [0-9a-f]{32}')
 
-          # 2. 解凍されたファイル郡をスキャンして、記事ごとにタイトル名フォルダへ仕分け＆リネーム
+          # 2. 一時フォルダ内のすべてのファイル・フォルダ名をリネーム（ハッシュ削除）
+          # 階層の深いところから処理するために topdown=False にする
+          for root, dirs, files in os.walk(temp_dir, topdown=False):
+              for file in files:
+                  if hash_pattern.search(file):
+                      old_p = os.path.join(root, file)
+                      new_f = hash_pattern.sub('', file)
+                      new_p = os.path.join(root, new_f)
+                      os.rename(old_p, new_p)
+              for d in dirs:
+                  if hash_pattern.search(d):
+                      old_p = os.path.join(root, d)
+                      new_d = hash_pattern.sub('', d)
+                      new_p = os.path.join(root, new_d)
+                      os.rename(old_p, new_p)
+
+          # 3. リネーム後のHTMLファイル内のリンクや画像パスもハッシュ削除に合わせて書き換え
           for root, dirs, files in os.walk(temp_dir):
               for file in files:
                   if file.endswith('.html'):
-                      old_html_path = os.path.join(root, file)
-                      
-                      # HTML内の <title> タグからタイトルを取得、なければファイル名からハッシュを除いたものを使用
-                      title = file.replace('.html', '')
-                      try:
-                          with open(old_html_path, 'r', encoding='utf-8') as f:
-                              content = f.read()
-                              match = re.search(r'<title>(.*?)</title>', content, re.IGNORECASE)
-                              if match:
-                                  title = match.group(1).strip()
-                      except Exception:
-                          pass
-                      
-                      # フォルダ名に使えない文字（ファイルシステムで禁止されている文字）を安全な文字に置換
-                      safe_title = re.sub(r'[\\/*?:"<>|]', '', title)
-                      # ハッシュも念のため除去
-                      safe_title = hash_pattern.sub('', safe_title).strip()
+                      f_path = os.path.join(root, file)
+                      with open(f_path, 'r', encoding='utf-8') as f:
+                          content = f.read()
+                      updated = hash_pattern.sub('', content)
+                      if content != updated:
+                          with open(f_path, 'w', encoding='utf-8') as f:
+                              f.write(updated)
 
-                      # 新しい記事専用フォルダのパス（Posts/記事タイトル/）
-                      article_dir = os.path.join(posts_dir, safe_title)
-                      os.makedirs(article_dir, exist_ok=True)
+          # 4. 階層構造（ツリー）をそのまま Posts/ の中へ丸ごと移動
+          # temp_dir 直下にあるもの（フォルダやファイル）を Posts/ の中に移す
+          for item in os.listdir(temp_dir):
+              src_item = os.path.join(temp_dir, item)
+              dst_item = os.path.join(posts_dir, item)
+              
+              # すでにPosts内に同名ファイル/フォルダがある場合は一度削除して上書き
+              if os.path.exists(dst_item):
+                  if os.path.isdir(dst_item):
+                      shutil.rmtree(dst_item)
+                  else:
+                      os.remove(dst_item)
+              
+              shutil.move(src_item, dst_item)
 
-                      # HTMLファイル自体の新しいパス（ハッシュを削除したファイル名）
-                      new_file_name = hash_pattern.sub('', file)
-                      new_html_path = os.path.join(article_dir, new_file_name)
-
-                      # HTMLファイル内のハッシュ削除とリンク置換
-                      with open(old_html_path, 'r', encoding='utf-8') as f:
-                          html_content = f.read()
-                      html_content = hash_pattern.sub('', html_content)
-                      
-                      with open(new_html_path, 'w', encoding='utf-8') as f:
-                          f.write(html_content)
-
-                      # もし同じ名前の「_files」フォルダ（画像等）があれば、それも一緒に記事タイトルフォルダへ移動
-                      base_name_without_ext = file.replace('.html', '')
-                      possible_assets_dir = os.path.join(root, base_name_without_ext + '_files')
-                      if os.path.exists(possible_assets_dir):
-                          new_assets_name = hash_pattern.sub('', base_name_without_ext) + '_files'
-                          target_assets_dir = os.path.join(article_dir, new_assets_name)
-                          if os.path.exists(target_assets_dir):
-                              shutil.rmtree(target_assets_dir)
-                          shutil.move(possible_assets_dir, target_assets_dir)
-                          print(f"Moved assets to: {target_assets_dir}")
-
-          # 3. 一時フォルダを削除
+          # 5. 一時フォルダを削除
           if os.path.exists(temp_dir):
               shutil.rmtree(temp_dir)
 
-          # 4. リポジトリ全体のHTMLファイルをスキャンして index.html を生成
+          # 6. リポジトリ全体のHTMLファイルをスキャンして index.html を生成
           html_files = []
           for root, dirs, files in os.walk('.'):
-              if '.github' in root or 'temp_extracted' in root:
+              if '.github' in root:
                   continue
               for file in files:
                   if file.endswith('.html') and file != 'index.html':
                       rel_path = os.path.relpath(os.path.join(root, file), '.')
                       rel_path = rel_path.replace('\\', '/')
                       
+                      # タイトル抽出
                       title = file.replace('.html', '')
                       try:
                           with open(os.path.join(root, file), 'r', encoding='utf-8') as f:
@@ -119,7 +114,7 @@ jobs:
                           pass
                       html_files.append((rel_path, title))
 
-          # 5. index.html の自動生成
+          # 7. index.html の自動生成
           index_content = """<!DOCTYPE html>
           <html lang="ja">
           <head>
@@ -150,7 +145,7 @@ jobs:
 
           with open('index.html', 'w', encoding='utf-8') as f:
               f.write(index_content)
-          print("Successfully organized into title folders and generated index.html!")
+          print("Successfully extracted keeping original hierarchy and generated index.html!")
           EOF
 
       - name: Commit and push changes
@@ -158,5 +153,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff --staged --quiet || git commit -m "Organize articles into title folders, remove hashes, and update index.html"
+          git diff --staged --quiet || git commit -m "Keep ZIP hierarchy in Posts, remove hashes, and update index.html"
           git push
