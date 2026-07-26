@@ -25,7 +25,7 @@ jobs:
         run: |
           pip install beautifulsoup4
 
-      - name: Clean hashes, check links, extract ZIP, and template HTMLs
+      - name: Clean old posts, extract ZIP, and template HTMLs
         run: |
           python - << 'EOF'
           import os
@@ -36,12 +36,18 @@ jobs:
           from bs4 import BeautifulSoup
 
           posts_dir = 'Posts'
-          os.makedirs(posts_dir, exist_ok=True)
-
           hash_pattern = re.compile(r'(?:%20|\s+)[0-9a-f]{32}', re.IGNORECASE)
 
           # ==========================================
-          # 🎨 記事全体の共通テンプレートHTML（リンクカードのスタイル調整を含む）
+          # 🗑️ 【重要】新しいZIP解凍の前に、古い Posts ディレクトリ等を完全リセット
+          # ==========================================
+          if os.path.exists(posts_dir):
+              shutil.rmtree(posts_dir)
+          os.makedirs(posts_dir, exist_ok=True)
+
+
+          # ==========================================
+          # 🎨 記事全体の共通テンプレートHTML（リンクをタイトルだけのシンプル表示に）
           # ==========================================
           def render_template(title, body_html):
               return f'''<!DOCTYPE html>
@@ -75,49 +81,49 @@ jobs:
                   }}
                   p {{ margin: 1em 0; }}
                   
-                  .content img {{
+                  /* 通常の画像は適度に制限 */
+                  .content img:not(.bookmark-icon) {{
                       max-width: 100%;
                       height: auto;
                       max-height: 250px;
                       object-fit: cover;
                       border-radius: 6px;
                   }}
-                  .content figure {{
-                      max-width: 600px;
-                      margin: 20px auto;
-                  }}
 
-                  /* 🔗 Notionのブックマーク・リンクカードのコンパクト化 */
+                  /* 🔗 Notionのブックマーク・リンクカードを「タイトルだけのリンク」にシンプル化 */
                   .content figure.bookmarked-page,
-                  .content .source,
-                  .content a:has(> img) {{
-                      border: 1px solid #e1e4e8;
-                      border-radius: 8px;
-                      padding: 12px 16px;
-                      margin: 15px 0;
-                      background: #f8f9fa;
-                      display: flex;
-                      align-items: center;
-                      gap: 15px;
-                      text-decoration: none;
-                      box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+                  .content .source {{
+                      background: transparent !important;
+                      border: none !important;
+                      box-shadow: none !important;
+                      padding: 0 !important;
+                      margin: 1em 0 !important;
                   }}
-                  /* ブックマーク内の説明文や長すぎるテキスト・不要要素を非表示にしてスッキリさせる */
+                  /* サムネイル画像や説明文、不要なURLテキストなどは完全に非表示にしてタイトルリンクだけにする */
+                  .content figure.bookmarked-page img,
                   .content figure.bookmarked-page p,
-                  .content .source p,
-                  .content figure.bookmarked-page .bookmark-description {{
+                  .content figure.bookmarked-page .bookmark-description,
+                  .content .source img {{
                       display: none !important;
                   }}
-                  /* タイトルとサムネイルのレイアウト調整 */
+                  /* リンクテキスト（タイトル）を綺麗な青文字の下線付きリンクとして目立たせる */
                   .content figure.bookmarked-page a,
                   .content .source a {{
-                      font-weight: 600;
                       color: #0969da;
-                      text-decoration: none;
+                      text-decoration: underline;
+                      font-weight: 600;
+                      font-size: 1.05em;
+                      background: #f6f8fa;
+                      padding: 8px 12px;
+                      border-radius: 6px;
+                      border: 1px solid #d0d7de;
+                      display: inline-block;
+                      width: 100%;
+                      box-sizing: border-box;
                   }}
                   .content figure.bookmarked-page a:hover,
                   .content .source a:hover {{
-                      text-decoration: underline;
+                      background: #eef2f5;
                   }}
 
                   .embed-youtube {{
@@ -333,7 +339,7 @@ jobs:
                   shutil.rmtree(temp_dir)
 
           # ==========================================
-          # 📚 index.html の生成
+          # 📚 index.html の生成（現在存在する Posts 内のファイルだけをスキャン）
           # ==========================================
           html_files = []
           all_tags = set()
@@ -364,7 +370,7 @@ jobs:
                             
                             target_text = str(body_node) if body_node else content
                             raw_text = soup_temp.get_text(separator=' ', strip=True)
-                            raw_text = re.sub(r'\s+', ' ', raw_text).replace('"', '&quot;')
+                            raw_text = re.sub(r'\s+', ' ', raw_text).replace('"', '"')
                     except Exception:
                         pass
                     
@@ -474,7 +480,7 @@ jobs:
 
           with open('index.html', 'w', encoding='utf-8') as f:
               f.write(index_content)
-          print("Successfully updated index and compact link card styles!")
+          print("Successfully updated index and synchronized posts cleanup!")
           EOF
 
       - name: Commit and push changes
@@ -482,5 +488,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff --staged --quiet || git commit -m "Update: compact link cards to show only title and thumbnail"
+          git diff --staged --quiet || git commit -m "Update: clean old posts before extraction and simplify link cards to titles only"
           git push
