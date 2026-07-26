@@ -35,51 +35,57 @@ jobs:
 
           hash_pattern = re.compile(r'(?:%20|\s+)[0-9a-f]{32}', re.IGNORECASE)
 
-          # HTML全体からURLをスマートに置換するための処理関数
-          def replace_urls_with_embeds(content):
-              # 1. YouTubeの置換
-              yt_pattern = re.compile(r'https?://(?:www\.)?(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/ \s<]{11})', re.IGNORECASE)
-              def yt_replacer(match):
-                  vid = match.group(1)
-                  return f'''
-                  <div style="position: relative; width: 100%; height: 0; padding-bottom: 56.25%; margin: 20px 0;">
-                      <iframe src="https://www.youtube.com/embed/{vid}" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0;" allowfullscreen></iframe>
-                  </div>
-                  '''
-              content = yt_pattern.sub(yt_replacer, content)
+          # ==========================================
+          # 📋 [安全な設定] aタグ単位でリンクをキャッチして綺麗に変換するルール
+          # ==========================================
+          def process_link_tags(content):
+              # Notionのエクスポートで生成される <a href="URL">URL</a> またはそれに準ずるタグを正確に捕まえる
+              link_pattern = re.compile(r'<a\s+[^>]*?href="([^"]+?)"[^>]*>(.*?)</a>', re.DOTALL | re.IGNORECASE)
 
-              # 2. Google Mapsの置換
-              map_pattern = re.compile(r'https?://(?:[a-zA-Z0-9-]+\.)?(?:google\.com\/maps[^\s"<]*|goo\.gl\/maps[^\s"<]*|maps\.app\.goo\.gl[^\s"<]*)', re.IGNORECASE)
-              def map_replacer(match):
-                  url = match.group(0)
-                  return f'''
-                  <div style="width: 100%; height: 400px; margin: 20px 0;">
-                      <iframe src="{url}" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy"></iframe>
-                  </div>
-                  '''
-              content = map_pattern.sub(map_replacer, content)
+              def replace_tag(match):
+                  href_val = match.group(1).strip()
+                  
+                  # ハッシュの掃除
+                  clean_href = hash_pattern.sub('', href_val)
 
-              # 3. 一般的なWebリンク（YouTubeやMaps以外で、まだiframe化されていないhttpから始まるURL）のカード化
-              # すでにiframeタグの中にあるURLは除外するためのスマートなパターン
-              web_pattern = re.compile(r'(?<!src=")(?<!href=")(https?://[^\s<>"]+)', re.IGNORECASE)
-              def web_replacer(match):
-                  url = match.group(1)
-                  # 画像ファイルやCSSなどの拡張子を除外
-                  if any(url.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.css', '.js']):
-                      return url
-                  return f'''
-                  <div style="border: 1px solid #e1e4e8; border-radius: 8px; padding: 15px; margin: 20px 0; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-                      <a href="{url}" target="_blank" style="text-decoration: none; color: #0366d6; font-weight: bold; font-size: 1.1em; display: block; margin-bottom: 5px;">
-                          🔗 {url}
-                      </a>
-                      <div style="font-size: 0.85em; color: #586069; word-break: break-all;">
-                          {url}
+                  # 1. YouTubeの判定
+                  yt_match = re.search(r'(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/ \s<]{11})', clean_href)
+                  if yt_match:
+                      vid = yt_match.group(1)
+                      return f'''
+                      <div style="position: relative; width: 100%; height: 0; padding-bottom: 56.25%; margin: 20px 0;">
+                          <iframe src="https://www.youtube.com/embed/{vid}" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0;" allowfullscreen></iframe>
                       </div>
-                  </div>
-                  '''
-              content = web_pattern.sub(web_replacer, content)
-              
-              return content
+                      '''
+
+                  # 2. Google Mapsの判定
+                  if any(domain in clean_href for domain in ['google.com/maps', 'goo.gl/maps', 'maps.app.goo.gl']):
+                      return f'''
+                      <div style="width: 100%; height: 400px; margin: 20px 0;">
+                          <iframe src="{clean_href}" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy"></iframe>
+                      </div>
+                      '''
+
+                  # 3. 通常のWebリンク（CSSや画像、内部リンク以外）のカード化
+                  if clean_href.startswith('http://') or clean_href.startswith('https://'):
+                      if any(clean_href.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.css', '.js']):
+                          return match.group(0) # そのまま維持
+                      
+                      return f'''
+                      <div style="border: 1px solid #e1e4e8; border-radius: 8px; padding: 15px; margin: 20px 0; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                          <a href="{clean_href}" target="_blank" style="text-decoration: none; color: #0366d6; font-weight: bold; font-size: 1.1em; display: block; margin-bottom: 5px;">
+                              🔗 {clean_href}
+                          </a>
+                          <div style="font-size: 0.85em; color: #586069; word-break: break-all;">
+                              {clean_href}
+                          </div>
+                      </div>
+                      '''
+
+                  # それ以外のリンク（内部リンクやファイルリンクなど）はそのまま返す
+                  return match.group(0)
+
+              return link_pattern.sub(replace_tag, content)
 
           # 0. 既存ファイル名のセットを収集
           all_existing_htmls = set()
@@ -90,7 +96,7 @@ jobs:
                   if file.endswith('.html'):
                       all_existing_htmls.add(file)
 
-          # 1. 既存のHTMLファイルをスキャンして埋め込み・カード化を適用
+          # 1. 既存のHTMLファイルをスキャンしてレイアウトを崩さずにリンクを置換
           for root, dirs, files in os.walk('.'):
               if '.github' in root or 'temp_extracted' in root:
                   continue
@@ -101,9 +107,7 @@ jobs:
                           content = f.read()
 
                       content = hash_pattern.sub('', content)
-                      
-                      # URLを自動で埋め込みやカードに変換
-                      updated_content = replace_urls_with_embeds(content)
+                      updated_content = process_link_tags(content)
 
                       if content != updated_content:
                           with open(file_path, 'w', encoding='utf-8') as f:
@@ -135,7 +139,7 @@ jobs:
                           new_path = os.path.join(root, new_d)
                           os.rename(old_path, new_path)
 
-              # 解凍されたHTMLにも埋め込み変換を適用
+              # 解凍されたHTMLにも安全なリンク置換を適用
               for root, dirs, files in os.walk(temp_dir):
                   for file in files:
                       if file.endswith('.html'):
@@ -144,7 +148,7 @@ jobs:
                               content = f.read()
                           
                           content = hash_pattern.sub('', content)
-                          updated_content = replace_urls_with_embeds(content)
+                          updated_content = process_link_tags(content)
                           
                           if content != updated_content:
                               with open(file_path, 'w', encoding='utf-8') as f:
@@ -219,7 +223,7 @@ jobs:
 
           with open('index.html', 'w', encoding='utf-8') as f:
               f.write(index_content)
-          print("Successfully synced, auto-embedded maps/youtube, cardified web links, and updated index.html!")
+          print("Successfully synced with safe link processing!")
           EOF
 
       - name: Commit and push changes
@@ -227,5 +231,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff --staged --quiet || git commit -m "Sync: direct URL regex matching for embeds and cards"
+          git diff --staged --quiet || git commit -m "Sync: safe link tag replacement preserving layout"
           git push
