@@ -25,8 +25,14 @@
         <input type="text" id="searchInput" class="search-box" placeholder="🔍 記事のタイトルや本文をキーワード検索..." onkeyup="filterArticles()">
         <div class="tag-container">
             <span class="tag-badge active" onclick="filterByTag('ALL')">すべて</span>
+            <span class="tag-badge" onclick="filterByTag('finance')">#finance</span>
+            <span class="tag-badge" onclick="filterByTag('signe')">#signe</span>
+            <span class="tag-badge" onclick="filterByTag('テスト')">#テスト</span>
+            <span class="tag-badge" onclick="filterByTag('社会')">#社会</span>
         </div>
         <ul id="articleList">
+        <li class="article-item" data-tags="finance,社会" data-content="テスト テスト ← ログ一覧に戻る テスト 第一屋製パン(株)【2215】：株価チャート - Yahoo!ファイナンス 第一屋製パン(株)【2215】の株式チャート推移をご覧いただけます。Yahoo!ファイナンスでは株価速報、チャート、ランキング、ポートフォリオ、ニュース、掲示板など投資判断に役立つ情報を掲載しています。 https://finance.yahoo.co.jp/quote/2215.T/chart?frm=dly&trm=6m&scl=stndrd&styl=cndl&evnts=volume&ovrIndctr=sma%2Cmma%2Clma&addIndctr=&compare= #finance #社会"><a href="Posts/20260726/テスト.html">テスト</a><span class="path">(Posts/20260726/テスト.html)</span></li>
+        <li class="article-item" data-tags="テスト,社会,signe" data-content="Facebookまめ Facebookまめ ← ログ一覧に戻る Facebookまめ 花房城跡です。 🔗 大きな地図で見るグーグルマップ フィールズ賞受賞のツィマーマン氏、授賞式でOpenAI移籍を電撃発表—師弟はAI二大陣営に分かれる — BigGo ファイナンス 2026年の国際数学者会議（ICM）で、新たにフィールズ賞を受賞したジェイコブ・ツィマーマン氏が、授賞式後にOpenAIのAI安全性部門への加入をその場で発表した。… https://finance.biggo.jp/news/51505da0-b37a-4362-9b11-dca8b7ec50c8 #テスト #社会 #signe"><a href="Posts/20260726/Facebookまめ.html">Facebookまめ</a><span class="path">(Posts/20260726/Facebookまめ.html)</span></li>
     </ul>
 
     <script>
