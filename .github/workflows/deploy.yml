@@ -111,14 +111,26 @@ jobs:
                       text-decoration: none;
                   }}
                   .map-link a:hover {{ text-decoration: underline; }}
-                  /* Notion風のソース枠（カード風） */
-                  .source {{
-                      border: 1px solid #ddd;
-                      border-radius: 6px;
-                      padding: 1.2em;
+                  /* リンクカード */
+                  .link-card {{
+                      border: 1px solid #e1e4e8;
+                      border-radius: 8px;
+                      padding: 15px 20px;
+                      margin: 25px 0;
+                      background: #fff;
+                      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+                      transition: box-shadow 0.2s;
+                  }}
+                  .link-card:hover {{
+                      box-shadow: 0 4px 8px rgba(0,0,0,0.08);
+                  }}
+                  .link-card a {{
+                      text-decoration: none;
+                      color: #0366d6;
+                      font-weight: bold;
+                      font-size: 1.05em;
+                      display: block;
                       word-break: break-all;
-                      margin: 1.25em 0;
-                      background: #fafafa;
                   }}
                   .back-link {{
                       display: inline-block;
@@ -144,68 +156,65 @@ jobs:
           '''
 
           # ==========================================
-          # 🛠️ マップやYouTubeをカード・埋め込みにし、他はそのまま通す関数
+          # 🛠️ HTMLのリンク・テキストを綺麗にカード化する関数
           # ==========================================
           def transform_content(html_content):
               soup = BeautifulSoup(html_content, 'html.parser')
 
-              # すべての <a> タグを走査
-              for a_tag in list(soup.find_all('a', href=True)):
-                  if not a_tag.parent:
-                      continue
-                  
+              # 1. 既存の <a> タグやテキスト内のURLをチェックして置換する
+              # すべての a タグを走査
+              for a_tag in soup.find_all('a', href=True):
                   href = a_tag['href']
                   clean_href = hash_pattern.sub('', href).strip()
 
-                  # ① YouTubeの判定 -> iframe埋め込みに変換
+                  # すでにカードやiframeに囲まれている親要素があればスキップ（重複防止）
+                  if a_tag.find_parent(class_=['link-card', 'embed-youtube', 'embed-map']):
+                      continue
+
+                  # ① YouTube
                   yt_match = re.search(r'(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/ \s<]{11})', clean_href)
                   if yt_match:
                       vid = yt_match.group(1)
                       new_div = soup.new_tag('div')
                       new_div['class'] = 'embed-youtube'
+                      new_div.clear()
                       new_div.append(BeautifulSoup(f'<iframe src="https://www.youtube.com/embed/{vid}" allowfullscreen></iframe>', 'html.parser'))
-                      
-                      parent_figure = a_tag.find_parent('figure')
-                      if parent_figure:
-                          parent_figure.replace_with(new_div)
-                      else:
-                          a_tag.replace_with(new_div)
+                      a_tag.replace_with(new_div)
                       continue
 
-                  # ② Google Mapsの判定 -> カード枠またはiframeに変換
-                  if any(domain in clean_href for domain in ['google.com/maps', 'goo.gl/maps', 'maps.app.goo.gl', 'maps.google.com']):
+                  # ② Google Maps
+                  if any(domain in clean_href for domain in ['google.com/maps', 'goo.gl/maps', 'maps.app.goo.gl']):
                       wrapper = soup.new_tag('div')
+                      map_div = soup.new_tag('div')
+                      map_div['class'] = 'embed-map'
+                      map_div.append(BeautifulSoup(f'<iframe src="https://maps.google.co.jp/maps?q={clean_href}&output=embed" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy"></iframe>', 'html.parser'))
                       
-                      if 'maps.app.goo.gl' in clean_href or 'goo.gl/maps' in clean_href:
-                          wrapper['class'] = 'source'
-                          wrapper.append(BeautifulSoup(f'🗺️ <span>Googleマップで確認する</span><br><a href="{clean_href}" target="_blank">{clean_href}</a>', 'html.parser'))
-                      else:
-                          map_div = soup.new_tag('div')
-                          map_div['class'] = 'embed-map'
-                          map_div.append(BeautifulSoup(f'<iframe src="https://maps.google.co.jp/maps?q={clean_href}&output=embed" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy"></iframe>', 'html.parser'))
-                          
-                          link_div = soup.new_tag('div')
-                          link_div['class'] = 'map-link'
-                          link_div.append(BeautifulSoup(f'<a href="{clean_href}" target="_blank">🔗 大きな地図で見るグーグルマップ</a>', 'html.parser'))
-                          
-                          wrapper.append(map_div)
-                          wrapper.append(link_div)
-
-                      parent_figure = a_tag.find_parent('figure')
-                      if parent_figure:
-                          parent_figure.replace_with(wrapper)
-                      else:
-                          a_tag.replace_with(wrapper)
+                      link_div = soup.new_tag('div')
+                      link_div['class'] = 'map-link'
+                      link_div.append(BeautifulSoup(f'<a href="{clean_href}" target="_blank">🔗 大きな地図で見るグーグルマップ</a>', 'html.parser'))
+                      
+                      wrapper.append(map_div)
+                      wrapper.append(link_div)
+                      a_tag.replace_with(wrapper)
                       continue
 
-                  # ③ その他の通常のURLやリンクメンションはそのまま通す
+                  # ③ 一般リンク (アセット系ファイルやCSSなどはそのまま)
+                  if any(clean_href.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.css', '.js']):
+                      continue
 
-              # 本文エリアの取得
+                  if clean_href.startswith('http://') or clean_href.startswith('https://'):
+                      card_div = soup.new_tag('div')
+                      card_div['class'] = 'link-card'
+                      card_div.append(BeautifulSoup(f'<a href="{clean_href}" target="_blank">🔗 {clean_href}</a>', 'html.parser'))
+                      a_tag.replace_with(card_div)
+
+              # 本文エリア（.page-body または bodyの中身）を取り出す
               body_node = soup.find('div', class_='page-body')
               if not body_node:
                   body_node = soup.find('body')
               
               if body_node:
+                  # 余計なNotion固有のラッパー要素の不要な属性を掃除
                   return str(body_node)
               return str(soup)
 
@@ -222,6 +231,7 @@ jobs:
                       zip_ref.extractall(temp_dir)
                   os.remove(z_file)
 
+              # ハッシュ名の除去
               for root, dirs, files in os.walk(temp_dir, topdown=False):
                   for file in files:
                       if hash_pattern.search(file):
@@ -234,6 +244,7 @@ jobs:
               target_date_dir = os.path.join(posts_dir, today_str)
               os.makedirs(target_date_dir, exist_ok=True)
 
+              # NotionエクスポートHTMLをテンプレートに流し込んで再保存
               for root, dirs, files in os.walk(temp_dir):
                   for file in files:
                       if file.endswith('.html'):
@@ -241,13 +252,18 @@ jobs:
                           with open(file_path, 'r', encoding='utf-8') as f:
                               raw_html = f.read()
                           
+                          # タイトルの取得
                           title_match = re.search(r'<title>(.*?)</title>', raw_html, re.IGNORECASE)
                           title = title_match.group(1) if title_match else file.replace('.html', '')
                           title = hash_pattern.sub('', title).strip()
 
+                          # 本文の変換処理
                           processed_body = transform_content(raw_html)
+                          
+                          # テンプレート適用済みHTMLを生成
                           final_html = render_template(title, processed_body)
 
+                          # 保存先パス
                           rel_sub_path = os.path.relpath(root, temp_dir)
                           dest_sub_dir = os.path.join(target_date_dir, rel_sub_path) if rel_sub_path != '.' else target_date_dir
                           os.makedirs(dest_sub_dir, exist_ok=True)
@@ -258,6 +274,7 @@ jobs:
                           with open(dest_file_path, 'w', encoding='utf-8') as f:
                               f.write(final_html)
 
+              # 画像などのアセットフォルダも移動
               for item in os.listdir(temp_dir):
                   src_item = os.path.join(temp_dir, item)
                   if os.path.isdir(src_item):
@@ -277,19 +294,19 @@ jobs:
               if '.github' in root or 'temp_extracted' in root:
                   continue
               for file in files:
-                if file.endswith('.html') and file != 'index.html':
-                    rel_path = os.path.relpath(os.path.join(root, file), '.')
-                    rel_path = rel_path.replace('\\', '/')
-                    title = file.replace('.html', '')
-                    try:
-                        with open(os.path.join(root, file), 'r', encoding='utf-8') as f:
-                            content = f.read()
-                            match = re.search(r'<title>(.*?)</title>', content, re.IGNORECASE)
-                            if match:
-                                title = match.group(1)
-                    except Exception:
-                        pass
-                    html_files.append((rel_path, title))
+                  if file.endswith('.html') and file != 'index.html':
+                      rel_path = os.path.relpath(os.path.join(root, file), '.')
+                      rel_path = rel_path.replace('\\', '/')
+                      title = file.replace('.html', '')
+                      try:
+                          with open(os.path.join(root, file), 'r', encoding='utf-8') as f:
+                              content = f.read()
+                              match = re.search(r'<title>(.*?)</title>', content, re.IGNORECASE)
+                              if match:
+                                  title = match.group(1)
+                      except Exception:
+                          pass
+                      html_files.append((rel_path, title))
 
           index_content = """<!DOCTYPE html>
           <html lang="ja">
@@ -325,7 +342,7 @@ jobs:
 
           with open('index.html', 'w', encoding='utf-8') as f:
               f.write(index_content)
-          print("Successfully updated workflow script!")
+          print("Successfully templated and fixed all links and embeds!")
           EOF
 
       - name: Commit and push changes
@@ -333,5 +350,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff --staged --quiet || git commit -m "Update: refine map/youtube cards and keep native text links"
+          git diff --staged --quiet || git commit -m "Refactor: apply unified HTML template and BeautifulSoup parsing for reliable cards"
           git push
