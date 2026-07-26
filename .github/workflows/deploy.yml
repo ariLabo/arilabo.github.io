@@ -41,7 +41,7 @@ jobs:
           hash_pattern = re.compile(r'(?:%20|\s+)[0-9a-f]{32}', re.IGNORECASE)
 
           # ==========================================
-          # 🎨 記事全体の共通テンプレートHTML
+          # 🎨 記事全体の共通テンプレートHTML（リンクカードのスタイル調整を含む）
           # ==========================================
           def render_template(title, body_html):
               return f'''<!DOCTYPE html>
@@ -87,6 +87,39 @@ jobs:
                       margin: 20px auto;
                   }}
 
+                  /* 🔗 Notionのブックマーク・リンクカードのコンパクト化 */
+                  .content figure.bookmarked-page,
+                  .content .source,
+                  .content a:has(> img) {{
+                      border: 1px solid #e1e4e8;
+                      border-radius: 8px;
+                      padding: 12px 16px;
+                      margin: 15px 0;
+                      background: #f8f9fa;
+                      display: flex;
+                      align-items: center;
+                      gap: 15px;
+                      text-decoration: none;
+                      box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+                  }}
+                  /* ブックマーク内の説明文や長すぎるテキスト・不要要素を非表示にしてスッキリさせる */
+                  .content figure.bookmarked-page p,
+                  .content .source p,
+                  .content figure.bookmarked-page .bookmark-description {{
+                      display: none !important;
+                  }}
+                  /* タイトルとサムネイルのレイアウト調整 */
+                  .content figure.bookmarked-page a,
+                  .content .source a {{
+                      font-weight: 600;
+                      color: #0969da;
+                      text-decoration: none;
+                  }}
+                  .content figure.bookmarked-page a:hover,
+                  .content .source a:hover {{
+                      text-decoration: underline;
+                  }}
+
                   .embed-youtube {{
                       position: relative;
                       width: 100%;
@@ -122,14 +155,6 @@ jobs:
                       text-decoration: none;
                   }}
                   .map-link a:hover {{ text-decoration: underline; }}
-                  .source {{
-                      border: 1px solid #ddd;
-                      border-radius: 6px;
-                      padding: 1.2em;
-                      word-break: break-all;
-                      margin: 1.25em 0;
-                      background: #fafafa;
-                  }}
                   .back-link {{
                       display: inline-block;
                       margin-bottom: 20px;
@@ -236,10 +261,8 @@ jobs:
               else:
                   body_html = str(soup)
 
-              # カラーコード（例: #000, #333, #0969da など3桁または6桁のHEX）を除外しつつハッシュタグをリンク化する
               def tag_replacer(match):
                   tag_name = match.group(1)
-                  # 3桁または6桁のカラーコード形式ならタグとみなさずそのまま返す
                   if re.fullmatch(r'[0-9a-fA-F]{3}|[0-9a-fA-F]{6}', tag_name):
                       return f'#{tag_name}'
                   return f'<a href="../../index.html?tag={tag_name}" class="article-tag">#{tag_name}</a>'
@@ -310,7 +333,7 @@ jobs:
                   shutil.rmtree(temp_dir)
 
           # ==========================================
-          # 📚 index.html の生成（カラーコード除外対応）
+          # 📚 index.html の生成
           # ==========================================
           html_files = []
           all_tags = set()
@@ -324,26 +347,30 @@ jobs:
                     rel_path = os.path.relpath(os.path.join(root, file), '.')
                     rel_path = rel_path.replace('\\', '/')
                     title = file.replace('.html', '')
-                    content = ""
+                    raw_text = ""
+                    target_text = ""
                     try:
                         with open(os.path.join(root, file), 'r', encoding='utf-8') as f:
                             content = f.read()
-                            # 本文エリア（page-body）が存在する場合はそこからのみタグを抽出、なければ全体から
                             soup_temp = BeautifulSoup(content, 'html.parser')
-                            body_node = soup_temp.find('div', class_='page-body')
-                            target_text = str(body_node) if body_node else content
                             
                             match = re.search(r'<title>(.*?)</title>', content, re.IGNORECASE)
                             if match:
                                 title = match.group(1)
+                            
+                            body_node = soup_temp.find('div', class_='page-body')
+                            if not body_node:
+                                body_node = soup_temp.find('body')
+                            
+                            target_text = str(body_node) if body_node else content
+                            raw_text = soup_temp.get_text(separator=' ', strip=True)
+                            raw_text = re.sub(r'\s+', ' ', raw_text).replace('"', '&quot;')
                     except Exception:
-                        target_text = content
                         pass
                     
                     found_tags = re.findall(r'#([a-zA-Z0-9_\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]+)', target_text)
                     tag_list = []
                     for t in found_tags:
-                        # 3桁または6桁のCSSカラーコード（例: 000, 333, 0969da 等）はタグから除外する
                         if not re.fullmatch(r'[0-9a-fA-F]{3}|[0-9a-fA-F]{6}', t):
                             tag_list.append(t)
                             all_tags.add(t)
@@ -351,7 +378,8 @@ jobs:
                     article_data.append({
                         'path': rel_path,
                         'title': title,
-                        'tags': tag_list
+                        'tags': tag_list,
+                        'raw_text': raw_text
                     })
 
           index_content = """<!DOCTYPE html>
@@ -378,7 +406,7 @@ jobs:
           <body>
               <div class="container">
                   <h1>📚 教学・Pythonログ一覧</h1>
-                  <input type="text" id="searchInput" class="search-box" placeholder="🔍 記事をキーワード検索..." onkeyup="filterArticles()">
+                  <input type="text" id="searchInput" class="search-box" placeholder="🔍 記事のタイトルや本文をキーワード検索..." onkeyup="filterArticles()">
           """
 
           index_content += '        <div class="tag-container">\n'
@@ -390,7 +418,7 @@ jobs:
           index_content += '        <ul id="articleList">\n'
           for item in sorted(article_data, key=lambda x: x['path'], reverse=True):
               tags_str = ",".join(item['tags'])
-              index_content += f'        <li class="article-item" data-tags="{tags_str}"><a href="{item["path"]}">{item["title"]}</a><span class="path">({item["path"]})</span></li>\n'
+              index_content += f'        <li class="article-item" data-tags="{tags_str}" data-content="{item["title"]} {item["raw_text"]}"><a href="{item["path"]}">{item["title"]}</a><span class="path">({item["path"]})</span></li>\n'
           index_content += '    </ul>\n'
 
           index_content += """
@@ -402,10 +430,10 @@ jobs:
                       let items = document.getElementsByClassName('article-item');
                       
                       for (let i = 0; i < items.length; i++) {
-                          let text = items[i].textContent.toLowerCase();
+                          let searchTarget = items[i].getAttribute('data-content').toLowerCase();
                           let tags = items[i].getAttribute('data-tags');
                           
-                          let matchesSearch = text.includes(input);
+                          let matchesSearch = searchTarget.includes(input);
                           let matchesTag = (currentTag === 'ALL' || tags.split(',').includes(currentTag));
                           
                           if (matchesSearch && matchesTag) {
@@ -446,7 +474,7 @@ jobs:
 
           with open('index.html', 'w', encoding='utf-8') as f:
               f.write(index_content)
-          print("Successfully updated index and filtered out CSS color codes!")
+          print("Successfully updated index and compact link card styles!")
           EOF
 
       - name: Commit and push changes
@@ -454,6 +482,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff --staged --quiet || git commit -m "Update: exclude CSS color codes from auto-extracted tags"
+          git diff --staged --quiet || git commit -m "Update: compact link cards to show only title and thumbnail"
           git push
-
