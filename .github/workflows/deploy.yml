@@ -20,13 +20,14 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Process ZIP cleanly and generate index
+      - name: Extract into Date Folder, clean hashes, and generate index
         run: |
           python - << 'EOF'
           import os
           import zipfile
           import re
           import shutil
+          from datetime import datetime
 
           posts_dir = 'Posts'
           os.makedirs(posts_dir, exist_ok=True)
@@ -69,51 +70,26 @@ jobs:
                           content = f.read()
                       updated_content = hash_pattern.sub('', content)
                       if content != updated_content:
-                        with open(file_path, 'w', encoding='utf-8') as f:
-                            f.write(updated_content)
+                          with open(file_path, 'w', encoding='utf-8') as f:
+                              f.write(updated_content)
 
-          # 4. ZIP内にある各HTMLファイルを独立した記事フォルダとして整理して Posts/ へ配置
-          # (二重フォルダを防ぎ、 "Posts/記事タイトル/記事.html" という綺麗な構造にする)
-          for root, dirs, files in os.walk(temp_dir):
-              for file in files:
-                  if file.endswith('.html'):
-                      src_html_path = os.path.join(root, file)
-                      
-                      # タイトル抽出
-                      title = file.replace('.html', '')
-                      try:
-                          with open(src_html_path, 'r', encoding='utf-8') as f:
-                              content = f.read()
-                              match = re.search(r'<title>(.*?)</title>', content, re.IGNORECASE)
-                              if match:
-                                  title = match.group(1).strip()
-                      except Exception:
-                          pass
-                      
-                      safe_title = re.sub(r'[\\/*?:"<>|]', '', title).strip()
-                      if not safe_title:
-                          safe_title = file.replace('.html', '')
+          # 4. 今日のお日付（YYYYMMDD形式）のフォルダを Posts/ の中に作成し、ZIPの中身をそのまま入れる
+          today_str = datetime.now().strftime('%Y%m%d')
+          target_date_dir = os.path.join(posts_dir, today_str)
+          os.makedirs(target_date_dir, exist_ok=True)
 
-                      # 記事専用の親フォルダ（Posts/記事タイトル/）
-                      article_dir = os.path.join(posts_dir, safe_title)
-                      os.makedirs(article_dir, exist_ok=True)
-
-                      # HTMLを記事フォルダ内に移動
-                      dest_html_path = os.path.join(article_dir, file)
-                      if os.path.abspath(src_html_path) != os.path.abspath(dest_html_path):
-                          if os.path.exists(dest_html_path):
-                              os.remove(dest_html_path)
-                          shutil.move(src_html_path, dest_html_path)
-
-                      # 対応する _files フォルダがあればそれも記事フォルダ内に移動
-                      base_name = file.replace('.html', '')
-                      assets_folder_name = base_name + '_files'
-                      src_assets_path = os.path.join(root, assets_folder_name)
-                      if os.path.exists(src_assets_path):
-                          dest_assets_path = os.path.join(article_dir, assets_folder_name)
-                          if os.path.exists(dest_assets_path):
-                              shutil.rmtree(dest_assets_path)
-                          shutil.move(src_assets_path, dest_assets_path)
+          # temp_dirの中にあるものをすべて日付フォルダへ移動
+          for item in os.listdir(temp_dir):
+              src_item = os.path.join(temp_dir, item)
+              dst_item = os.path.join(target_date_dir, item)
+              
+              if os.path.exists(dst_item):
+                  if os.path.isdir(dst_item):
+                      shutil.rmtree(dst_item)
+                  else:
+                      os.remove(dst_item)
+              
+              shutil.move(src_item, dst_item)
 
           # 5. 一時フォルダの削除
           if os.path.exists(temp_dir):
@@ -171,7 +147,7 @@ jobs:
 
           with open('index.html', 'w', encoding='utf-8') as f:
               f.write(index_content)
-          print("Successfully organized into proper title folders and generated index.html!")
+          print("Successfully organized into date folders and generated index.html!")
           EOF
 
       - name: Commit and push changes
@@ -179,6 +155,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff --staged --quiet || git commit -m "Fix folder nesting, remove hashes, and update index.html"
+          git diff --staged --quiet || git commit -m "Organize export into date folders, clean hashes, and update index.html"
           git push
-
