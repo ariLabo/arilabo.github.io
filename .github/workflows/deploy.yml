@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Extract, clean internal links & filenames, and generate index
+      - name: Extract, clean all internal href links, filenames, and generate index
         run: |
           python - << 'EOF'
           import os
@@ -43,10 +43,11 @@ jobs:
                   zip_ref.extractall(temp_dir)
               os.remove(z_file)
 
-          # ハッシュ値削除用の正規表現（半角スペース＋32文字の16進数）
+          # ハッシュ値（半角スペース＋32文字の16進数）の正規表現
           hash_pattern = re.compile(r' [0-9a-f]{32}')
 
-          # 2. HTMLファイルの中身（内部リンクやテキスト）に含まれるハッシュを一括置換
+          # 2. HTMLファイル内の href 属性などのリンク文字列に含まれるハッシュをピンポイントで削除
+          # 例: href="子ページ 1234567890abcdef1234567890abcdef.html" -> href="子ページ.html"
           for root, dirs, files in os.walk(temp_dir):
               for file in files:
                   if file.endswith('.html'):
@@ -54,9 +55,18 @@ jobs:
                       with open(file_path, 'r', encoding='utf-8') as f:
                           content = f.read()
                       
-                      # HTML内のリンクや記述にあるハッシュをすべて削除
-                      updated_content = hash_pattern.sub('', content)
-                      
+                      # href="..." の中にあるハッシュ付きファイル名を置換する関数
+                      def remove_hash_from_href(match):
+                          # match.group(0) は href="..." の中身全体
+                          inner = match.group(1)
+                          cleaned = hash_pattern.sub('', inner)
+                          return f'href="{cleaned}"'
+
+                      # href="..." のパターンにマッチさせてハッシュを削除
+                      updated_content = re.sub(r'href="([^"]+?)"', remove_hash_from_href, content)
+                      # 一般的なテキスト内のハッシュも念のため削除
+                      updated_content = hash_pattern.sub('', updated_content)
+
                       if content != updated_content:
                           with open(file_path, 'w', encoding='utf-8') as f:
                               f.write(updated_content)
@@ -149,7 +159,7 @@ jobs:
 
           with open('index.html', 'w', encoding='utf-8') as f:
               f.write(index_content)
-          print("Successfully cleaned HTML internal links, filenames, and generated index.html!")
+          print("Successfully cleaned all href links, filenames, and generated index.html!")
           EOF
 
       - name: Commit and push changes
@@ -157,5 +167,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff --staged --quiet || git commit -m "Clean internal HTML links and filenames, update index.html"
+          git diff --staged --quiet || git commit -m "Clean href links inside HTML, remove hashes, and update index.html"
           git push
