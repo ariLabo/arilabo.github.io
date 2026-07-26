@@ -34,9 +34,16 @@ jobs:
 
           hash_pattern = re.compile(r' [0-9a-f]{32}')
 
+          # 0. リポジトリ内にあるすべてのHTMLファイル名のセットをあらかじめ収集しておく（存在チェック用）
+          all_existing_htmls = set()
+          for root, dirs, files in os.walk('.'):
+              if '.github' in root or 'temp_extracted' in root:
+                  continue
+              for file in files:
+                  if file.endswith('.html'):
+                      all_existing_htmls.add(file)
+
           # 1. 【ZIP解凍前】既存のHTMLファイルをスキャン
-          #    - href内やテキスト中のハッシュ（半角スペース＋32文字）を綺麗に削除する
-          #    - Posts内に実在しないファイルへのリンクは、リンクを外してテキスト（中身）だけ残す
           for root, dirs, files in os.walk('.'):
               if '.github' in root or 'temp_extracted' in root:
                   continue
@@ -62,17 +69,13 @@ jobs:
                           if href_val.startswith('http://') or href_val.startswith('https://') or href_val.startswith('#'):
                               return match.group(0)
 
-                          # すでにハッシュは削除されているが、念のため再度除去
+                          # ハッシュを綺麗に取り除いたファイル名を取得
                           clean_href = hash_pattern.sub('', href_val)
-                          
-                          if href_val.startswith('/'):
-                              target_path = os.path.normpath(os.path.join('.', href_val.lstrip('/')))
-                          else:
-                              target_path = os.path.normpath(os.path.join(root, clean_href))
+                          target_filename = os.path.basename(clean_href)
 
-                          # ファイルがPosts内などに存在するか確認
-                          if not os.path.exists(target_path):
-                              # 存在しない場合は、<a>タグを消して中のテキスト（inner_html）だけを残す
+                          # リポジトリ内のどこかにそのファイル名が存在するか確認
+                          if target_filename not in all_existing_htmls:
+                              # 存在しない場合は、<a>タグを消して中のテキストだけを残す
                               return inner_html
                           
                           # 存在するなら、ハッシュをきれいに掃除したhrefに書き換えて維持する
@@ -83,6 +86,7 @@ jobs:
                       if content != updated_content:
                           with open(file_path, 'w', encoding='utf-8') as f:
                               f.write(updated_content)
+                          print(f"Updated HTML: {file_path}")
 
           # 2. 一時フォルダにZIPを解凍
           temp_dir = 'temp_extracted'
@@ -197,7 +201,7 @@ jobs:
 
           with open('index.html', 'w', encoding='utf-8') as f:
               f.write(index_content)
-          print("Successfully cleaned hashes, removed broken links, and updated index.html!")
+          print("Successfully processed and updated all HTML files!")
           EOF
 
       - name: Commit and push changes
@@ -205,5 +209,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff --staged --quiet || git commit -m "Clean existing hashes, remove broken links, and update index"
+          git diff --staged --quiet || git commit -m "Robust hash cleaning and link validation"
           git push
