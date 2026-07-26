@@ -23,7 +23,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip import beautifulsoup4 || pip install beautifulsoup4
+          pip install beautifulsoup4
 
       - name: Extract ZIP, update Posts, and generate clean index
         run: |
@@ -40,9 +40,6 @@ jobs:
 
           hash_pattern = re.compile(r'(?:%20|\s+)[0-9a-f]{32}', re.IGNORECASE)
 
-          # ==========================================
-          # 🎨 記事全体の共通テンプレートHTML（ミニサムネイル付きリンク対応）
-          # ==========================================
           def render_template(title, body_html):
               return f'''<!DOCTYPE html>
           <html lang="ja">
@@ -74,7 +71,6 @@ jobs:
                       color: #111;
                   }}
                   p {{ margin: 1em 0; }}
-                  
                   .content img:not(.bookmark-thumb) {{
                       max-width: 100%;
                       height: auto;
@@ -82,8 +78,6 @@ jobs:
                       object-fit: cover;
                       border-radius: 6px;
                   }}
-
-                  /* 🔗 サムネイル付きシンプルブックマークリンクのスタイル */
                   .content .simple-bookmark {{
                       display: flex;
                       align-items: center;
@@ -101,9 +95,6 @@ jobs:
                       background: #eef2f5;
                       text-decoration: none;
                   }}
-                  .content .simple-bookmark:hover .bookmark-title {{
-                      text-decoration: underline;
-                  }}
                   .bookmark-thumb {{
                       width: 36px;
                       height: 36px;
@@ -119,42 +110,34 @@ jobs:
                       word-break: break-all;
                       flex-grow: 1;
                   }}
-
-                  .embed-youtube {{
-                      position: relative;
-                      width: 100%;
-                      height: 0;
-                      padding-bottom: 56.25%;
-                      margin: 25px 0;
-                      border-radius: 8px;
+                  details.code-fold {{
+                      background: #f6f8fa;
+                      border: 1px solid #d0d7de;
+                      border-radius: 6px;
+                      margin: 1.5em 0;
                       overflow: hidden;
                   }}
-                  .embed-youtube iframe {{
-                      position: absolute;
-                      top: 0; left: 0;
-                      width: 100%; height: 100%;
-                      border: 0;
+                  details.code-fold summary {{
+                      padding: 10px 14px;
+                      font-weight: 600;
+                      cursor: pointer;
+                      background: #eaeef2;
+                      color: #24292e;
+                      user-select: none;
                   }}
-                  .embed-map {{
-                      width: 100%;
-                      height: 400px;
-                      margin: 25px 0;
-                      border: 1px solid #ccd8e0;
-                      border-radius: 8px;
-                      overflow: hidden;
-                      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+                  details.code-fold summary:hover {{
+                      background: #dde3ea;
                   }}
-                  .map-link {{
-                      text-align: right;
+                  details.code-fold pre {{
+                      margin: 0;
+                      padding: 14px;
+                      overflow-x: auto;
+                      background: #f6f8fa;
+                      font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace;
                       font-size: 0.85em;
-                      margin-top: -15px;
-                      margin-bottom: 25px;
+                      line-height: 1.45;
+                      color: #24292e;
                   }}
-                  .map-link a {{
-                      color: #1a73e8;
-                      text-decoration: none;
-                  }}
-                  .map-link a:hover {{ text-decoration: underline; }}
                   .back-link {{
                       display: inline-block;
                       margin-bottom: 20px;
@@ -171,11 +154,6 @@ jobs:
                       border-radius: 4px;
                       text-decoration: none;
                       font-size: 0.9em;
-                      font-weight: normal;
-                  }}
-                  .content a.article-tag:hover {{
-                      background: #d0d7de;
-                      text-decoration: underline;
                   }}
               </style>
           </head>
@@ -191,113 +169,67 @@ jobs:
           </html>
           '''
 
-          # ==========================================
-          # 🛠️ リンクカード整形・マップ・YouTube変換
-          # ==========================================
           def transform_content(html_content):
               soup = BeautifulSoup(html_content, 'html.parser')
+
+              for pre_tag in list(soup.find_all('pre')):
+                  if pre_tag.find_parent('details', class_='code-fold'):
+                      continue
+                  try:
+                      code_text = pre_tag.get_text()
+                      first_line = code_text.strip().split('\n')[0] if code_text.strip() else ""
+                      summary_title = f"💻 ソースコードを表示: {first_line[:30]}..." if len(first_line) > 0 else "💻 ソースコードを表示"
+
+                      details_tag = soup.new_tag('details')
+                      details_tag['class'] = 'code-fold'
+
+                      summary_tag = soup.new_tag('summary')
+                      summary_tag.string = summary_title
+                      details_tag.append(summary_tag)
+
+                      pre_copy = BeautifulSoup(str(pre_tag), 'html.parser').pre
+                      if pre_copy:
+                          details_tag.append(pre_copy)
+                      else:
+                          details_tag.append(pre_tag)
+
+                      parent_figure = pre_tag.find_parent('figure')
+                      if parent_figure and parent_figure.name == 'figure':
+                          parent_figure.replace_with(details_tag)
+                      else:
+                          pre_tag.replace_with(details_tag)
+                  except Exception:
+                      continue
 
               for bookmark in list(soup.find_all('figure', class_='bookmarked-page')):
                   a_tag = bookmark.find('a', href=True)
                   if a_tag:
                       href = hash_pattern.sub('', a_tag['href']).strip()
-                      
                       title_text = ""
-                      text_divs = bookmark.find_all(['div', 'p', 'span'])
-                      for td in text_divs:
+                      for td in bookmark.find_all(['div', 'p', 'span']):
                           t = td.get_text(strip=True)
                           if t and not t.startswith('http') and len(t) > len(title_text):
                               title_text = t
-                      
                       if not title_text:
                           title_text = href
 
                       img_tag = bookmark.find('img')
-                      thumb_src = ""
-                      if img_tag and img_tag.get('src'):
-                          thumb_src = hash_pattern.sub('', img_tag['src']).strip()
+                      thumb_src = hash_pattern.sub('', img_tag['src']).strip() if img_tag and img_tag.get('src') else ""
 
-                      new_a = soup.new_tag('a')
-                      new_a['href'] = href
-                      new_a['target'] = '_blank'
-                      new_a['class'] = 'simple-bookmark'
-
+                      new_a = soup.new_tag('a', href=href, target='_blank', class_='simple-bookmark')
                       if thumb_src:
-                          img_el = soup.new_tag('img')
-                          img_el['src'] = thumb_src
-                          img_el['class'] = 'bookmark-thumb'
+                          img_el = soup.new_tag('img', src=thumb_src, class_='bookmark-thumb')
                           new_a.append(img_el)
-
-                      title_span = soup.new_tag('span')
-                      title_span['class'] = 'bookmark-title'
+                      
+                      title_span = soup.new_tag('span', class_='bookmark-title')
                       title_span.string = title_text
                       new_a.append(title_span)
-
                       bookmark.replace_with(new_a)
                   else:
                       bookmark.decompose()
 
-              for a_tag in list(soup.find_all('a', href=True)):
-                  if not a_tag.parent:
-                      continue
-                  
-                  href = a_tag['href']
-                  clean_href = hash_pattern.sub('', href).strip()
-
-                  yt_match = re.search(r'(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/ \s<]{11})', clean_href)
-                  if yt_match:
-                      vid = yt_match.group(1)
-                      new_div = soup.new_tag('div')
-                      new_div['class'] = 'embed-youtube'
-                      new_div.append(BeautifulSoup(f'<iframe src="https://www.youtube.com/embed/{vid}" allowfullscreen></iframe>', 'html.parser'))
-                      
-                      parent_figure = a_tag.find_parent('figure')
-                      if parent_figure:
-                          parent_figure.replace_with(new_div)
-                      else:
-                          a_tag.replace_with(new_div)
-                      continue
-
-                  if any(domain in clean_href for domain in ['google.com/maps', 'goo.gl/maps', 'maps.app.goo.gl', 'maps.google.com']):
-                      wrapper = soup.new_tag('div')
-                      
-                      if 'maps.app.goo.gl' in clean_href or 'goo.gl/maps' in clean_href:
-                          wrapper['class'] = 'source'
-                          wrapper.append(BeautifulSoup(f'🗺️ <span>Googleマップで確認する</span><br><a href="{clean_href}" target="_blank">{clean_href}</a>', 'html.parser'))
-                      else:
-                          latlng_match = re.search(r'@([0-9\.-]+),([0-9\.-]+)', clean_href)
-                          if latlng_match:
-                              lat, lng = latlng_match.groups()
-                              query_val = f"{lat},{lng}"
-                          else:
-                              query_val = clean_href
-
-                          map_div = soup.new_tag('div')
-                          map_div['class'] = 'embed-map'
-                          map_div.append(BeautifulSoup(f'<iframe src="https://maps.google.co.jp/maps?q={query_val}&output=embed" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy"></iframe>', 'html.parser'))
-                          
-                          link_div = soup.new_tag('div')
-                          link_div['class'] = 'map-link'
-                          link_div.append(BeautifulSoup(f'<a href="{clean_href}" target="_blank">🔗 大きな地図で見るグーグルマップ</a>', 'html.parser'))
-                          
-                          wrapper.append(map_div)
-                          wrapper.append(link_div)
-
-                      parent_figure = a_tag.find_parent('figure')
-                      if parent_figure:
-                          parent_figure.replace_with(wrapper)
-                      else:
-                          a_tag.replace_with(wrapper)
-                      continue
-
-              body_node = soup.find('div', class_='page-body')
-              if not body_node:
-                  body_node = soup.find('body')
-              
-              if body_node:
-                  body_html = str(body_node)
-              else:
-                  body_html = str(soup)
+              body_node = soup.find('div', class_='page-body') or soup.find('body')
+              body_html = str(body_node) if body_node else str(soup)
 
               def tag_replacer(match):
                   tag_name = match.group(1)
@@ -306,13 +238,8 @@ jobs:
                   return f'<a href="../../index.html?tag={tag_name}" class="article-tag">#{tag_name}</a>'
 
               tag_pattern = re.compile(r'#([a-zA-Z0-9_\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]+)(?![^<]*>)')
-              processed_body = tag_pattern.sub(tag_replacer, body_html)
+              return tag_pattern.sub(tag_replacer, body_html)
 
-              return processed_body
-
-          # ==========================================
-          # ファイルの走査・新規ZIP展開と反映
-          # ==========================================
           temp_dir = 'temp_extracted'
           zip_files = [f for f in os.listdir('.') if f.endswith('.zip')]
 
@@ -329,7 +256,7 @@ jobs:
                           os.rename(os.path.join(root, file), os.path.join(root, hash_pattern.sub('', file)))
                   for d in dirs:
                       if hash_pattern.search(d):
-                        os.rename(os.path.join(root, d), os.path.join(root, hash_pattern.sub('', d)))
+                          os.rename(os.path.join(root, d), os.path.join(root, hash_pattern.sub('', d)))
 
               today_str = datetime.now().strftime('%Y%m%d')
               target_date_dir = os.path.join(posts_dir, today_str)
@@ -339,48 +266,30 @@ jobs:
                   for file in files:
                       if file.endswith('.html'):
                           file_path = os.path.join(root, file)
-                          with open(file_path, 'r', encoding='utf-8') as f:
-                              raw_html = f.read()
-                          
-                          title_match = re.search(r'<title>(.*?)</title>', raw_html, re.IGNORECASE)
-                          title = title_match.group(1) if title_match else file.replace('.html', '')
-                          title = hash_pattern.sub('', title).strip()
+                          try:
+                              with open(file_path, 'r', encoding='utf-8') as f:
+                                  raw_html = f.read()
+                              
+                              title_match = re.search(r'<title>(.*?)</title>', raw_html, re.IGNORECASE)
+                              title = hash_pattern.sub('', title_match.group(1)).strip() if title_match else file.replace('.html', '')
 
-                          processed_body = transform_content(raw_html)
-                          final_html = render_template(title, processed_body)
+                              processed_body = transform_content(raw_html)
+                              final_html = render_template(title, processed_body)
 
-                          rel_sub_path = os.path.relpath(root, temp_dir)
-                          dest_sub_dir = os.path.join(target_date_dir, rel_sub_path) if rel_sub_path != '.' else target_date_dir
-                          os.makedirs(dest_sub_dir, exist_ok=True)
-                          
-                          clean_file_name = hash_pattern.sub('', file)
-                          dest_file_path = os.path.join(dest_sub_dir, clean_file_name)
-                          
-                          with open(dest_file_path, 'w', encoding='utf-8') as f:
-                              f.write(final_html)
-
-              for item in os.listdir(temp_dir):
-                  src_item = os.path.join(temp_dir, item)
-                  if os.path.isdir(src_item):
-                      dst_item = os.path.join(target_date_dir, item)
-                      if os.path.exists(dst_item):
-                          # 既存の同名フォルダがある場合は中身を上書き・統合（既存記事を消さない）
-                          for sub_root, sub_dirs, sub_files in os.walk(src_item):
-                              rel_p = os.path.relpath(sub_root, src_item)
-                              target_sub_p = os.path.join(dst_item, rel_p) if rel_p != '.' else dst_item
-                              os.makedirs(target_sub_p, exist_ok=True)
-                              for sf in sub_files:
-                                  shutil.move(os.path.join(sub_root, sf), os.path.join(target_sub_p, sf))
-                          shutil.rmtree(src_item)
-                      else:
-                          shutil.move(src_item, dst_item)
+                              rel_sub_path = os.path.relpath(root, temp_dir)
+                              dest_sub_dir = os.path.join(target_date_dir, rel_sub_path) if rel_sub_path != '.' else target_date_dir
+                              os.makedirs(dest_sub_dir, exist_ok=True)
+                              
+                              dest_file_path = os.path.join(dest_sub_dir, hash_pattern.sub('', file))
+                              with open(dest_file_path, 'w', encoding='utf-8') as f:
+                                  f.write(final_html)
+                          except Exception:
+                              pass
 
               if os.path.exists(temp_dir):
                   shutil.rmtree(temp_dir)
 
-          # ==========================================
-          # 📚 index.html の生成（現在 Posts 内に存在する有効なHTMLファイルだけをスキャンしてリスト化）
-          # ==========================================
+          # 📚 index.html の生成（コードブロックを除外してクリーンなテキストを抽出）
           article_data = []
           all_tags = set()
 
@@ -390,7 +299,6 @@ jobs:
                       if file.endswith('.html'):
                           full_path = os.path.join(root, file)
                           rel_path = os.path.relpath(full_path, '.').replace('\\', '/')
-                          
                           title = file.replace('.html', '')
                           raw_text = ""
                           target_text = ""
@@ -398,27 +306,23 @@ jobs:
                               with open(full_path, 'r', encoding='utf-8') as f:
                                   content = f.read()
                                   soup_temp = BeautifulSoup(content, 'html.parser')
-                                  
                                   match = re.search(r'<title>(.*?)</title>', content, re.IGNORECASE)
                                   if match:
                                       title = match.group(1)
                                   
-                                  body_node = soup_temp.find('div', class_='content')
-                                  if not body_node:
-                                      body_node = soup_temp.find('body')
-                                  
+                                  # 🛡️ 【防止策】検索テキスト抽出時にコードブロック(<pre>)や折りたたみ(<details>)を完全除外
+                                  for tag_to_remove in soup_temp.find_all(['pre', 'details', 'iframe']):
+                                      tag_to_remove.decompose()
+
+                                  body_node = soup_temp.find('div', class_='content') or soup_temp.find('body')
                                   target_text = str(body_node) if body_node else content
-                                  raw_text = soup_temp.get_text(separator=' ', strip=True)
-                                  raw_text = re.sub(r'\s+', ' ', raw_text)
+                                  raw_text = re.sub(r'\s+', ' ', soup_temp.get_text(separator=' ', strip=True))
                           except Exception:
                               pass
                           
                           found_tags = re.findall(r'#([a-zA-Z0-9_\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]+)', target_text)
-                          tag_list = []
-                          for t in found_tags:
-                              if not re.fullmatch(r'[0-9a-fA-F]{3}|[0-9a-fA-F]{6}', t):
-                                  tag_list.append(t)
-                                  all_tags.add(t)
+                          tag_list = [t for t in found_tags if not re.fullmatch(r'[0-9a-fA-F]{3}|[0-9a-fA-F]{6}', t)]
+                          all_tags.update(tag_list)
 
                           article_data.append({
                               'path': rel_path,
@@ -463,53 +367,37 @@ jobs:
           index_content += '        <ul id="articleList">\n'
           for item in sorted(article_data, key=lambda x: x['path'], reverse=True):
               tags_str = ",".join(item['tags'])
-              index_content += f'        <li class="article-item" data-tags="{tags_str}" data-content="{item["title"]} {item["raw_text"]}"><a href="{item["path"]}">{item["title"]}</a><span class="path">({item["path"]})</span></li>\n'
+              safe_title = item["title"].replace('"', '&quot;')
+              safe_raw = item["raw_text"].replace('"', '&quot;')
+              index_content += f'        <li class="article-item" data-tags="{tags_str}" data-content="{safe_title} {safe_raw}"><a href="{item["path"]}">{item["title"]}</a><span class="path">({item["path"]})</span></li>\n'
           index_content += '    </ul>\n'
 
           index_content += """
               <script>
                   let currentTag = 'ALL';
-
                   function filterArticles() {
                       let input = document.getElementById('searchInput').value.toLowerCase();
                       let items = document.getElementsByClassName('article-item');
-                      
                       for (let i = 0; i < items.length; i++) {
                           let searchTarget = items[i].getAttribute('data-content').toLowerCase();
                           let tags = items[i].getAttribute('data-tags');
-                          
                           let matchesSearch = searchTarget.includes(input);
                           let matchesTag = (currentTag === 'ALL' || tags.split(',').includes(currentTag));
-                          
-                          if (matchesSearch && matchesTag) {
-                              items[i].style.display = "";
-                          } else {
-                              items[i].style.display = "none";
-                          }
+                          items[i].style.display = (matchesSearch && matchesTag) ? "" : "none";
                       }
                   }
-
                   function filterByTag(tagName) {
                       currentTag = tagName;
-                      
                       let badges = document.getElementsByClassName('tag-badge');
                       for (let b of badges) {
-                          if (b.textContent === (tagName === 'ALL' ? 'すべて' : '#' + tagName)) {
-                              b.classList.add('active');
-                          } else {
-                              b.classList.remove('active');
-                          }
+                          b.classList.toggle('active', b.textContent === (tagName === 'ALL' ? 'すべて' : '#' + tagName));
                       }
-                      
                       filterArticles();
                   }
-
                   window.onload = function() {
                       const urlParams = new URLSearchParams(window.location.search);
                       const tagParam = urlParams.get('tag');
-                      if (tagParam) {
-                          filterByTag(tagParam);
-                      }
+                      if (tagParam) filterByTag(tagParam);
                   };
               </script>
               </div>
@@ -519,7 +407,7 @@ jobs:
 
           with open('index.html', 'w', encoding='utf-8') as f:
               f.write(index_content)
-          print("Successfully updated index based on active Posts while preserving existing files!")
+          print("Successfully built with excluded code blocks in index!")
           EOF
 
       - name: Commit and push changes
@@ -527,5 +415,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff --staged --quiet || git commit -m "Update: sync index with existing Posts and keep safe from full deletion"
+          git diff --staged --quiet || git commit -m "Fix: exclude code blocks from index data-content to prevent html corruption"
           git push
