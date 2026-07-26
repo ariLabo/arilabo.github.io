@@ -111,26 +111,13 @@ jobs:
                       text-decoration: none;
                   }}
                   .map-link a:hover {{ text-decoration: underline; }}
-                  /* リンクカード */
-                  .link-card {{
-                      border: 1px solid #e1e4e8;
-                      border-radius: 8px;
-                      padding: 15px 20px;
-                      margin: 25px 0;
-                      background: #fff;
-                      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-                      transition: box-shadow 0.2s;
-                  }}
-                  .link-card:hover {{
-                      box-shadow: 0 4px 8px rgba(0,0,0,0.08);
-                  }}
-                  .link-card a {{
-                      text-decoration: none;
-                      color: #0366d6;
-                      font-weight: bold;
-                      font-size: 1.05em;
-                      display: block;
+                  /* Notion風のソース枠（エクスポート元のスタイルを維持） */
+                  .source {{
+                      border: 1px solid #ddd;
+                      border-radius: 3px;
+                      padding: 1.5em;
                       word-break: break-all;
+                      margin: 1.25em 0;
                   }}
                   .back-link {{
                       display: inline-block;
@@ -156,12 +143,12 @@ jobs:
           '''
 
           # ==========================================
-          # 🛠️ 複数あっても確実にすべて変換・カード化する関数
+          # 🛠️ マップとYouTubeをiframe埋め込みにし、他はそのまま通す関数
           # ==========================================
           def transform_content(html_content):
               soup = BeautifulSoup(html_content, 'html.parser')
 
-              # すべての <a> タグを安全にリスト化して走査（途中でDOM構造が変わっても影響を受けないようにする）
+              # すべての <a> タグを走査
               for a_tag in list(soup.find_all('a', href=True)):
                   if not a_tag.parent:
                       continue
@@ -169,29 +156,30 @@ jobs:
                   href = a_tag['href']
                   clean_href = hash_pattern.sub('', href).strip()
 
-                  # すでに処理済みの親要素があればスキップ
-                  if a_tag.find_parent(class_=['link-card', 'embed-youtube', 'embed-map']):
-                      continue
-
-                  # ① YouTube
+                  # ① YouTubeの判定 -> iframe埋め込みに変換
                   yt_match = re.search(r'(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/ \s<]{11})', clean_href)
                   if yt_match:
                       vid = yt_match.group(1)
                       new_div = soup.new_tag('div')
                       new_div['class'] = 'embed-youtube'
                       new_div.append(BeautifulSoup(f'<iframe src="https://www.youtube.com/embed/{vid}" allowfullscreen></iframe>', 'html.parser'))
-                      a_tag.replace_with(new_div)
+                      
+                      parent_figure = a_tag.find_parent('figure')
+                      if parent_figure:
+                          parent_figure.replace_with(new_div)
+                      else:
+                          a_tag.replace_with(new_div)
                       continue
 
-                  # ② Google Maps
+                  # ② Google Mapsの判定 -> 地図埋め込みに変換
                   if any(domain in clean_href for domain in ['google.com/maps', 'goo.gl/maps', 'maps.app.goo.gl', 'maps.google.com']):
                       wrapper = soup.new_tag('div')
                       
                       if 'maps.app.goo.gl' in clean_href or 'goo.gl/maps' in clean_href:
-                          card_div = soup.new_tag('div')
-                          card_div['class'] = 'link-card'
-                          card_div.append(BeautifulSoup(f'<a href="{clean_href}" target="_blank">🗺️ Googleマップで場所を確認する（外部サイト）</a>', 'html.parser'))
-                          wrapper.append(card_div)
+                          map_div = soup.new_tag('div')
+                          map_div['class'] = 'source'
+                          map_div.append(BeautifulSoup(f'🗺️ Googleマップで開く: <a href="{clean_href}" target="_blank">{clean_href}</a>', 'html.parser'))
+                          wrapper.append(map_div)
                       else:
                           map_div = soup.new_tag('div')
                           map_div['class'] = 'embed-map'
@@ -203,21 +191,17 @@ jobs:
                           
                           wrapper.append(map_div)
                           wrapper.append(link_div)
-                          
-                      a_tag.replace_with(wrapper)
+
+                      parent_figure = a_tag.find_parent('figure')
+                      if parent_figure:
+                          parent_figure.replace_with(wrapper)
+                      else:
+                          a_tag.replace_with(wrapper)
                       continue
 
-                  # ③ アセット系（画像やCSSなど）はスキップ
-                  if any(clean_href.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.css', '.js']):
-                      continue
+                  # ③ その他の通常のURLやリンクメンションは、変更を加えずそのまま通す
 
-                  # ④ 一般的なWebリンク
-                  if clean_href.startswith('http://') or clean_href.startswith('https://'):
-                      card_div = soup.new_tag('div')
-                      card_div['class'] = 'link-card'
-                      card_div.append(BeautifulSoup(f'<a href="{clean_href}" target="_blank">🔗 {clean_href}</a>', 'html.parser'))
-                      a_tag.replace_with(card_div)
-
+              # 本文エリアの取得
               body_node = soup.find('div', class_='page-body')
               if not body_node:
                   body_node = soup.find('body')
@@ -294,19 +278,19 @@ jobs:
               if '.github' in root or 'temp_extracted' in root:
                   continue
               for file in files:
-                  if file.endswith('.html') and file != 'index.html':
-                      rel_path = os.path.relpath(os.path.join(root, file), '.')
-                      rel_path = rel_path.replace('\\', '/')
-                      title = file.replace('.html', '')
-                      try:
-                          with open(os.path.join(root, file), 'r', encoding='utf-8') as f:
-                              content = f.read()
-                              match = re.search(r'<title>(.*?)</title>', content, re.IGNORECASE)
-                              if match:
-                                  title = match.group(1)
-                      except Exception:
-                          pass
-                      html_files.append((rel_path, title))
+                if file.endswith('.html') and file != 'index.html':
+                    rel_path = os.path.relpath(os.path.join(root, file), '.')
+                    rel_path = rel_path.replace('\\', '/')
+                    title = file.replace('.html', '')
+                    try:
+                        with open(os.path.join(root, file), 'r', encoding='utf-8') as f:
+                            content = f.read()
+                            match = re.search(r'<title>(.*?)</title>', content, re.IGNORECASE)
+                            if match:
+                                title = match.group(1)
+                    except Exception:
+                        pass
+                    html_files.append((rel_path, title))
 
           index_content = """<!DOCTYPE html>
           <html lang="ja">
@@ -342,7 +326,7 @@ jobs:
 
           with open('index.html', 'w', encoding='utf-8') as f:
               f.write(index_content)
-          print("Successfully fixed multi-map rendering bug!")
+          print("Successfully updated with clean Notion-native text links/mentions and proper media embeds!")
           EOF
 
       - name: Commit and push changes
@@ -350,5 +334,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff --staged --quiet || git commit -m "Fix: support multiple maps and embeds in single page"
+          git diff --staged --quiet || git commit -m "Update: keep Notion text links and mentions raw, embed YouTube/Maps properly"
           git push
