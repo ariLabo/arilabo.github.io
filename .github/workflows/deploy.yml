@@ -185,27 +185,16 @@ jobs:
                   # ② Google Maps
                   if any(domain in clean_href for domain in ['google.com/maps', 'goo.gl/maps', 'maps.app.goo.gl']):
                       wrapper = soup.new_tag('div')
+                      map_div = soup.new_tag('div')
+                      map_div['class'] = 'embed-map'
+                      map_div.append(BeautifulSoup(f'<iframe src="https://maps.google.co.jp/maps?q={clean_href}&output=embed" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy"></iframe>', 'html.parser'))
                       
-                      # 短縮URL（maps.app.goo.gl など）の場合はiframeで表示するとずれるため、
-                      # 綺麗なマップ用のカードリンクとして安全に表示する
-                      if 'maps.app.goo.gl' in clean_href or 'goo.gl/maps' in clean_href:
-                          card_div = soup.new_tag('div')
-                          card_div['class'] = 'link-card'
-                          card_div.append(BeautifulSoup(f'<a href="{clean_href}" target="_blank">🗺️ Googleマップで場所を確認する（外部サイト）</a>', 'html.parser'))
-                          wrapper.append(card_div)
-                      else:
-                          # 通常の詳細URL（place等を含む場合）はiframeを埋め込む
-                          map_div = soup.new_tag('div')
-                          map_div['class'] = 'embed-map'
-                          map_div.append(BeautifulSoup(f'<iframe src="https://maps.google.co.jp/maps?q={clean_href}&output=embed" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy"></iframe>', 'html.parser'))
-                          
-                          link_div = soup.new_tag('div')
-                          link_div['class'] = 'map-link'
-                          link_div.append(BeautifulSoup(f'<a href="{clean_href}" target="_blank">🔗 大きな地図で見るグーグルマップ</a>', 'html.parser'))
-                          
-                          wrapper.append(map_div)
-                          wrapper.append(link_div)
-                          
+                      link_div = soup.new_tag('div')
+                      link_div['class'] = 'map-link'
+                      link_div.append(BeautifulSoup(f'<a href="{clean_href}" target="_blank">🔗 大きな地図で見るグーグルマップ</a>', 'html.parser'))
+                      
+                      wrapper.append(map_div)
+                      wrapper.append(link_div)
                       a_tag.replace_with(wrapper)
                       continue
 
