@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 jobs:
   deploy:
@@ -73,12 +75,11 @@ jobs:
                           with open(file_path, 'w', encoding='utf-8') as f:
                               f.write(updated_content)
 
-          # 4. 今日のお日付（YYYYMMDD形式）のフォルダを Posts/ の中に作成し、ZIPの中身をそのまま入れる
+          # 4. 日付フォルダ（YYYYMMDD形式）のフォルダを Posts/ の中に作成し、ZIPの中身をそのまま入れる
           today_str = datetime.now().strftime('%Y%m%d')
           target_date_dir = os.path.join(posts_dir, today_str)
           os.makedirs(target_date_dir, exist_ok=True)
 
-          # temp_dirの中にあるものをすべて日付フォルダへ移動
           for item in os.listdir(temp_dir):
               src_item = os.path.join(temp_dir, item)
               dst_item = os.path.join(target_date_dir, item)
@@ -98,7 +99,7 @@ jobs:
           # 6. リポジトリ全体のHTMLファイルをスキャンして index.html を自動生成
           html_files = []
           for root, dirs, files in os.walk('.'):
-              if '.github' in root:
+              if '.github' in root or 'temp_extracted' in root:
                   continue
               for file in files:
                   if file.endswith('.html') and file != 'index.html':
