@@ -182,21 +182,41 @@ jobs:
                       a_tag.replace_with(new_div)
                       continue
 
-                  # ② Google Maps
-                  if any(domain in clean_href for domain in ['google.com/maps', 'goo.gl/maps', 'maps.app.goo.gl']):
+                  # ② Google Mapsの判定 -> 座標を抽出して正しいiframe埋め込みに変換
+                  if any(domain in clean_href for domain in ['google.com/maps', 'goo.gl/maps', 'maps.app.goo.gl', 'maps.google.com']):
                       wrapper = soup.new_tag('div')
-                      map_div = soup.new_tag('div')
-                      map_div['class'] = 'embed-map'
-                      map_div.append(BeautifulSoup(f'<iframe src="https://maps.google.co.jp/maps?q={clean_href}&output=embed" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy"></iframe>', 'html.parser'))
                       
-                      link_div = soup.new_tag('div')
-                      link_div['class'] = 'map-link'
-                      link_div.append(BeautifulSoup(f'<a href="{clean_href}" target="_blank">🔗 大きな地図で見るグーグルマップ</a>', 'html.parser'))
-                      
-                      wrapper.append(map_div)
-                      wrapper.append(link_div)
-                      a_tag.replace_with(wrapper)
+                      if 'maps.app.goo.gl' in clean_href or 'goo.gl/maps' in clean_href:
+                          wrapper['class'] = 'source'
+                          wrapper.append(BeautifulSoup(f'🗺️ <span>Googleマップで確認する</span><br><a href="{clean_href}" target="_blank">{clean_href}</a>', 'html.parser'))
+                      else:
+                          # URLから緯度・経度（@lat,lng）を抽出する
+                          latlng_match = re.search(r'@([0-9\.-]+),([0-9\.-]+)', clean_href)
+                          if latlng_match:
+                              lat, lng = latlng_match.groups()
+                              query_val = f"{lat},{lng}"
+                          else:
+                              # 緯度経度がない場合はURLエンコードされた場所名や全体をフォールバックとして使用
+                              query_val = clean_href
+
+                          map_div = soup.new_tag('div')
+                          map_div['class'] = 'embed-map'
+                          map_div.append(BeautifulSoup(f'<iframe src="https://maps.google.co.jp/maps?q={query_val}&output=embed" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy"></iframe>', 'html.parser'))
+                          
+                          link_div = soup.new_tag('div')
+                          link_div['class'] = 'map-link'
+                          link_div.append(BeautifulSoup(f'<a href="{clean_href}" target="_blank">🔗 大きな地図で見るグーグルマップ</a>', 'html.parser'))
+                          
+                          wrapper.append(map_div)
+                          wrapper.append(link_div)
+
+                      parent_figure = a_tag.find_parent('figure')
+                      if parent_figure:
+                          parent_figure.replace_with(wrapper)
+                      else:
+                          a_tag.replace_with(wrapper)
                       continue
+
 
                   # ③ 一般リンク (アセット系ファイルやCSSなどはそのまま)
                   if any(clean_href.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.css', '.js']):
