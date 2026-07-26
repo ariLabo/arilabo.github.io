@@ -38,16 +38,13 @@ jobs:
           posts_dir = 'Posts'
           hash_pattern = re.compile(r'(?:%20|\s+)[0-9a-f]{32}', re.IGNORECASE)
 
-          # ==========================================
-          # 🗑️ 【重要】新しいZIP解凍の前に、古い Posts ディレクトリ等を完全リセット
-          # ==========================================
+          # 古いPostsのクリーンアップ
           if os.path.exists(posts_dir):
               shutil.rmtree(posts_dir)
           os.makedirs(posts_dir, exist_ok=True)
 
-
           # ==========================================
-          # 🎨 記事全体の共通テンプレートHTML（リンクをタイトルだけのシンプル表示に）
+          # 🎨 記事全体の共通テンプレートHTML
           # ==========================================
           def render_template(title, body_html):
               return f'''<!DOCTYPE html>
@@ -81,8 +78,7 @@ jobs:
                   }}
                   p {{ margin: 1em 0; }}
                   
-                  /* 通常の画像は適度に制限 */
-                  .content img:not(.bookmark-icon) {{
+                  .content img:not(.bookmark-thumb) {{
                       max-width: 100%;
                       height: auto;
                       max-height: 250px;
@@ -90,40 +86,41 @@ jobs:
                       border-radius: 6px;
                   }}
 
-                  /* 🔗 Notionのブックマーク・リンクカードを「タイトルだけのリンク」にシンプル化 */
-                  .content figure.bookmarked-page,
-                  .content .source {{
-                      background: transparent !important;
-                      border: none !important;
-                      box-shadow: none !important;
-                      padding: 0 !important;
-                      margin: 1em 0 !important;
-                  }}
-                  /* サムネイル画像や説明文、不要なURLテキストなどは完全に非表示にしてタイトルリンクだけにする */
-                  .content figure.bookmarked-page img,
-                  .content figure.bookmarked-page p,
-                  .content figure.bookmarked-page .bookmark-description,
-                  .content .source img {{
-                      display: none !important;
-                  }}
-                  /* リンクテキスト（タイトル）を綺麗な青文字の下線付きリンクとして目立たせる */
-                  .content figure.bookmarked-page a,
-                  .content .source a {{
+                  /* 🔗 サムネイル付きシンプルブックマークリンクのスタイル */
+                  .content .simple-bookmark {{
+                      display: flex;
+                      align-items: center;
+                      gap: 12px;
                       color: #0969da;
-                      text-decoration: underline;
-                      font-weight: 600;
-                      font-size: 1.05em;
+                      text-decoration: none;
                       background: #f6f8fa;
-                      padding: 8px 12px;
+                      padding: 10px 14px;
                       border-radius: 6px;
                       border: 1px solid #d0d7de;
-                      display: inline-block;
-                      width: 100%;
+                      margin: 1em 0;
                       box-sizing: border-box;
                   }}
-                  .content figure.bookmarked-page a:hover,
-                  .content .source a:hover {{
+                  .content .simple-bookmark:hover {{
                       background: #eef2f5;
+                      text-decoration: none;
+                  }}
+                  .content .simple-bookmark:hover .bookmark-title {{
+                      text-decoration: underline;
+                  }}
+                  .bookmark-thumb {{
+                      width: 36px;
+                      height: 36px;
+                      object-fit: cover;
+                      border-radius: 4px;
+                      flex-shrink: 0;
+                      background: #fff;
+                      border: 1px solid #eaeaea;
+                  }}
+                  .bookmark-title {{
+                      font-weight: 600;
+                      font-size: 0.95em;
+                      word-break: break-all;
+                      flex-grow: 1;
                   }}
 
                   .embed-youtube {{
@@ -198,11 +195,55 @@ jobs:
           '''
 
           # ==========================================
-          # 🛠️ マップ・YouTube変換 ＆ 本文ハッシュタグのリンク化
+          # 🛠️ リンクカードのミニサムネイル付き単純化・マップ・YouTube変換
           # ==========================================
           def transform_content(html_content):
               soup = BeautifulSoup(html_content, 'html.parser')
 
+              # 1. Notionのブックマークブロック（figure.bookmarked-page）をミニサムネイル付きリンクに置き換え
+              for bookmark in list(soup.find_all('figure', class_='bookmarked-page')):
+                  a_tag = bookmark.find('a', href=True)
+                  if a_tag:
+                      href = hash_pattern.sub('', a_tag['href']).strip()
+                      
+                      # タイトルテキストの抽出
+                      title_text = ""
+                      text_divs = bookmark.find_all(['div', 'p', 'span'])
+                      for td in text_divs:
+                          t = td.get_text(strip=True)
+                          if t and not t.startswith('http') and len(t) > len(title_text):
+                              title_text = t
+                      
+                      if not title_text:
+                          title_text = href
+
+                      # サムネイル画像（faviconやOGP画像）の抽出
+                      img_tag = bookmark.find('img')
+                      thumb_src = ""
+                      if img_tag and img_tag.get('src'):
+                          thumb_src = hash_pattern.sub('', img_tag['src']).strip()
+
+                      new_a = soup.new_tag('a')
+                      new_a['href'] = href
+                      new_a['target'] = '_blank'
+                      new_a['class'] = 'simple-bookmark'
+
+                      if thumb_src:
+                          img_el = soup.new_tag('img')
+                          img_el['src'] = thumb_src
+                          img_el['class'] = 'bookmark-thumb'
+                          new_a.append(img_el)
+
+                      title_span = soup.new_tag('span')
+                      title_span['class'] = 'bookmark-title'
+                      title_span.string = title_text
+                      new_a.append(title_span)
+
+                      bookmark.replace_with(new_a)
+                  else:
+                      bookmark.decompose()
+
+              # 2. その他の通常のリンクの処理（YouTubeやGoogleマップなど）
               for a_tag in list(soup.find_all('a', href=True)):
                   if not a_tag.parent:
                       continue
@@ -339,7 +380,7 @@ jobs:
                   shutil.rmtree(temp_dir)
 
           # ==========================================
-          # 📚 index.html の生成（現在存在する Posts 内のファイルだけをスキャン）
+          # 📚 index.html の生成
           # ==========================================
           html_files = []
           all_tags = set()
@@ -370,7 +411,7 @@ jobs:
                             
                             target_text = str(body_node) if body_node else content
                             raw_text = soup_temp.get_text(separator=' ', strip=True)
-                            raw_text = re.sub(r'\s+', ' ', raw_text).replace('"', '"')
+                            raw_text = re.sub(r'\s+', ' ', raw_text).replace('"', '&quot;')
                     except Exception:
                         pass
                     
@@ -480,7 +521,7 @@ jobs:
 
           with open('index.html', 'w', encoding='utf-8') as f:
               f.write(index_content)
-          print("Successfully updated index and synchronized posts cleanup!")
+          print("Successfully added mini-thumbnails to bookmark links!")
           EOF
 
       - name: Commit and push changes
@@ -488,5 +529,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff --staged --quiet || git commit -m "Update: clean old posts before extraction and simplify link cards to titles only"
+          git diff --staged --quiet || git commit -m "Update: add mini-thumbnails to bookmark links"
           git push
