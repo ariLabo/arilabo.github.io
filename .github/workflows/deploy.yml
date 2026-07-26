@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Pre-check existing links, extract ZIP, clean hashes, and update
+      - name: Extract, clean all internal href links, filenames, and generate index
         run: |
           python - << 'EOF'
           import os
@@ -32,50 +32,7 @@ jobs:
           posts_dir = 'Posts'
           os.makedirs(posts_dir, exist_ok=True)
 
-          hash_pattern = re.compile(r' [0-9a-f]{32}')
-
-          # 1. 【ZIP解凍前】既存のHTMLファイルをスキャンし、リンク先が存在しない場合は打ち消し線にする
-          for root, dirs, files in os.walk('.'):
-              if '.github' in root or 'temp_extracted' in root:
-                  continue
-              for file in files:
-                  if file.endswith('.html'):
-                      file_path = os.path.join(root, file)
-                      with open(file_path, 'r', encoding='utf-8') as f:
-                          content = f.read()
-
-                      def check_link_existence(match):
-                          full_tag = match.group(0)
-                          href_val = match.group(1)
-                          link_text = match.group(2)
-
-                          # 外部URLやページ内リンクはそのまま維持
-                          if href_val.startswith('http://') or href_val.startswith('https://') or href_val.startswith('#'):
-                              return full_tag
-
-                          clean_href = hash_pattern.sub('', href_val)
-                          
-                          # パス解決の安全性を高めるため、絶対パスや相対パスを正規化
-                          # ルートディレクトリからの相対パスに変換して存在チェックを行う
-                          if href_val.startswith('/'):
-                              target_path = os.path.normpath(os.path.join('.', href_val.lstrip('/')))
-                          else:
-                              target_path = os.path.normpath(os.path.join(root, clean_href))
-
-                          # ファイルが存在するか確認
-                          if not os.path.exists(target_path):
-                              # 確実に文字を残したまま、リンクを外して打ち消し線にする
-                              return f'<del style="color: #888;" title="リンク先が存在しません">{link_text}</del>'
-                          
-                          return full_tag
-
-                      updated_content = re.sub(r'<a\s+[^>]*href="([^"]+?)"[^>]*>(.*?)</a>', check_link_existence, content, flags=re.DOTALL)
-
-                      if content != updated_content:
-                          with open(file_path, 'w', encoding='utf-8') as f:
-                              f.write(updated_content)
-
-          # 2. 一時フォルダにZIPを解凍
+          # 1. 一時フォルダにZIPを解凍
           temp_dir = 'temp_extracted'
           os.makedirs(temp_dir, exist_ok=True)
 
@@ -86,7 +43,35 @@ jobs:
                   zip_ref.extractall(temp_dir)
               os.remove(z_file)
 
-          # 3. 解凍されたすべてのファイルとフォルダの名前からハッシュを削除
+          # ハッシュ値（半角スペース＋32文字の16進数）の正規表現
+          hash_pattern = re.compile(r' [0-9a-f]{32}')
+
+          # 2. HTMLファイル内の href 属性などのリンク文字列に含まれるハッシュをピンポイントで削除
+          # 例: href="子ページ 1234567890abcdef1234567890abcdef.html" -> href="子ページ.html"
+          for root, dirs, files in os.walk(temp_dir):
+              for file in files:
+                  if file.endswith('.html'):
+                      file_path = os.path.join(root, file)
+                      with open(file_path, 'r', encoding='utf-8') as f:
+                          content = f.read()
+                      
+                      # href="..." の中にあるハッシュ付きファイル名を置換する関数
+                      def remove_hash_from_href(match):
+                          # match.group(0) は href="..." の中身全体
+                          inner = match.group(1)
+                          cleaned = hash_pattern.sub('', inner)
+                          return f'href="{cleaned}"'
+
+                      # href="..." のパターンにマッチさせてハッシュを削除
+                      updated_content = re.sub(r'href="([^"]+?)"', remove_hash_from_href, content)
+                      # 一般的なテキスト内のハッシュも念のため削除
+                      updated_content = hash_pattern.sub('', updated_content)
+
+                      if content != updated_content:
+                          with open(file_path, 'w', encoding='utf-8') as f:
+                              f.write(updated_content)
+
+          # 3. 解凍されたすべてのファイルとフォルダの名前からハッシュを削除（深い階層から順に）
           for root, dirs, files in os.walk(temp_dir, topdown=False):
               for file in files:
                   if hash_pattern.search(file):
@@ -101,27 +86,7 @@ jobs:
                       new_path = os.path.join(root, new_d)
                       os.rename(old_path, new_path)
 
-          # 4. 解凍されたHTMLファイル内の href 内のハッシュも置換
-          for root, dirs, files in os.walk(temp_dir):
-              for file in files:
-                  if file.endswith('.html'):
-                      file_path = os.path.join(root, file)
-                      with open(file_path, 'r', encoding='utf-8') as f:
-                          content = f.read()
-
-                      def remove_hash_from_href(match):
-                          inner = match.group(1)
-                          cleaned = hash_pattern.sub('', inner)
-                          return f'href="{cleaned}"'
-
-                      updated_content = re.sub(r'href="([^"]+?)"', remove_hash_from_href, content)
-                      updated_content = hash_pattern.sub('', updated_content)
-
-                      if content != updated_content:
-                          with open(file_path, 'w', encoding='utf-8') as f:
-                              f.write(updated_content)
-
-          # 5. 日付フォルダ（YYYYMMDD形式）のフォルダを Posts/ の中に作成し、ZIPの中身を移動
+          # 4. 日付フォルダ（YYYYMMDD形式）のフォルダを Posts/ の中に作成し、ZIPの中身をそのまま入れる
           today_str = datetime.now().strftime('%Y%m%d')
           target_date_dir = os.path.join(posts_dir, today_str)
           os.makedirs(target_date_dir, exist_ok=True)
@@ -138,11 +103,11 @@ jobs:
               
               shutil.move(src_item, dst_item)
 
-          # 6. 一時フォルダの削除
+          # 5. 一時フォルダの削除
           if os.path.exists(temp_dir):
               shutil.rmtree(temp_dir)
 
-          # 7. リポジトリ全体のHTMLファイルをスキャンして index.html を自動生成
+          # 6. リポジトリ全体のHTMLファイルをスキャンして index.html を自動生成
           html_files = []
           for root, dirs, files in os.walk('.'):
               if '.github' in root or 'temp_extracted' in root:
@@ -163,7 +128,7 @@ jobs:
                           pass
                       html_files.append((rel_path, title))
 
-          # 8. index.html の生成
+          # 7. index.html の生成
           index_content = """<!DOCTYPE html>
           <html lang="ja">
           <head>
@@ -194,7 +159,7 @@ jobs:
 
           with open('index.html', 'w', encoding='utf-8') as f:
               f.write(index_content)
-          print("Successfully updated with safe strikethrough logic!")
+          print("Successfully cleaned all href links, filenames, and generated index.html!")
           EOF
 
       - name: Commit and push changes
@@ -202,5 +167,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff --staged --quiet || git commit -m "Fix strikethrough logic to preserve text safely"
+          git diff --staged --quiet || git commit -m "Clean href links inside HTML, remove hashes, and update index.html"
           git push
