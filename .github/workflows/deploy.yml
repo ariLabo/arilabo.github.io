@@ -42,7 +42,7 @@ jobs:
           
           # 🖼️ メディア用フォルダのルートと実行月フォルダを設定
           month_str = datetime.now().strftime('%Y%m')
-          media_dir = os.path.join('media', month_str)
+          media_dir = os.path.join('Media', month_str)
           os.makedirs(media_dir, exist_ok=True)
 
           hash_pattern = re.compile(r'(?:%20|\s+)[0-9a-f]{32}', re.IGNORECASE)
