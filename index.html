@@ -38,11 +38,12 @@
         function filterArticles() {
             let input = document.getElementById('searchInput').value.toLowerCase();
             let items = document.getElementsByClassName('article-item');
+            let tagParamMatch = currentTag;
             for (let i = 0; i < items.length; i++) {
                 let searchTarget = items[i].getAttribute('data-content').toLowerCase();
                 let tags = items[i].getAttribute('data-tags');
                 let matchesSearch = searchTarget.includes(input);
-                let matchesTag = (currentTag === 'ALL' || tags.split(',').includes(currentTag));
+                let matchesTag = (tagParamMatch === 'ALL' || tags.split(',').includes(tagParamMatch));
                 items[i].style.display = (matchesSearch && matchesTag) ? "" : "none";
             }
         }
