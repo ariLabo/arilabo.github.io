@@ -415,6 +415,21 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git pull origin main --rebase || true
+
+
+
+      # 👇 ここから新しく追加・修正するデプロイ部分
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'  # ルートディレクトリ（index.htmlやPostsが含まれる場所）をそのまま公開
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
           git add .
           git diff --staged --quiet || git commit -m "Fix: exclude code blocks from index data-content to prevent html corruption"
           git push origin main
