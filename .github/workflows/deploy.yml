@@ -183,11 +183,20 @@ jobs:
           def transform_content(html_content, month_str):
               soup = BeautifulSoup(html_content, 'html.parser')
 
-              for img in soup.find_all('img'):
-                  src = img.get('src')
-                  if src:
-                      clean_src = hash_pattern.sub('', src).split('/')[-1]
-                      img['src'] = f"../../Media/{month_str}/{clean_src}"
+          # 修正後
+          for img in soup.find_all('img'):
+              src = img.get('src')
+              if src:
+                  clean_src = hash_pattern.sub('', src).split('/')[-1]
+                  correct_path = f"../../Media/{month_str}/{clean_src}"
+                  
+                  # <img> 自体のパスを修正
+                  img['src'] = correct_path
+                  
+                  # もし <img> が <a> タグで囲まれているなら、そのリンク先も正しいパスに修正する
+                  parent_a = img.find_parent('a')
+                  if parent_a:
+                      parent_a['href'] = correct_path
 
               for pre_tag in list(soup.find_all('pre')):
                   if pre_tag.find_parent('details', class_='code-fold'):
