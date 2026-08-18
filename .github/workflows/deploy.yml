@@ -11,7 +11,6 @@ permissions:
   pages: write
   id-token: write
 
-# 複数同時実行を防ぐ設定（デプロイメントの競合を防ぐため推奨）
 concurrency:
   group: "pages"
   cancel-in-progress: false
@@ -32,7 +31,7 @@ jobs:
         run: |
           pip install beautifulsoup4
 
-      - name: Extract ZIP (Recursive), organize media, update Posts, and generate clean index
+      - name: Extract ZIP, organize media, update Posts, and generate clean index
         run: |
           python - << 'EOF'
           import os
@@ -183,20 +182,16 @@ jobs:
           def transform_content(html_content, month_str):
               soup = BeautifulSoup(html_content, 'html.parser')
 
-          # 修正後
-          for img in soup.find_all('img'):
-              src = img.get('src')
-              if src:
-                  clean_src = hash_pattern.sub('', src).split('/')[-1]
-                  correct_path = f"../../Media/{month_str}/{clean_src}"
-                  
-                  # <img> 自体のパスを修正
-                  img['src'] = correct_path
-                  
-                  # もし <img> が <a> タグで囲まれているなら、そのリンク先も正しいパスに修正する
-                  parent_a = img.find_parent('a')
-                  if parent_a:
-                      parent_a['href'] = correct_path
+              for img in soup.find_all('img'):
+                  src = img.get('src')
+                  if src:
+                      clean_src = hash_pattern.sub('', src).split('/')[-1]
+                      correct_path = f"../../Media/{month_str}/{clean_src}"
+                      img['src'] = correct_path
+                      
+                      parent_a = img.find_parent('a')
+                      if parent_a:
+                          parent_a['href'] = correct_path
 
               for pre_tag in list(soup.find_all('pre')):
                   if pre_tag.find_parent('details', class_='code-fold'):
@@ -243,7 +238,7 @@ jobs:
                       thumb_src = ""
                       if img_tag and img_tag.get('src'):
                           clean_thumb = hash_pattern.sub('', img_tag['src']).split('/')[-1]
-                          thumb_src = f"../../media/{month_str}/{clean_thumb}"
+                          thumb_src = f"../../Media/{month_str}/{clean_thumb}"
 
                       new_a = soup.new_tag('a', href=href, target='_blank', class_='simple-bookmark')
                       if thumb_src:
@@ -273,62 +268,65 @@ jobs:
           os.makedirs(temp_dir, exist_ok=True)
 
           zip_files = [f for f in os.listdir('.') if f.endswith('.zip')]
-          for z_file in zip_files:
-              with zipfile.ZipFile(z_file, 'r') as zip_ref:
-                  zip_ref.extractall(temp_dir)
-              os.remove(z_file)
+          if not zip_files:
+              print("No zip files found. Skipping extraction.")
+          else:
+              for z_file in zip_files:
+                  with zipfile.ZipFile(z_file, 'r') as zip_ref:
+                      zip_ref.extractall(temp_dir)
+                  os.remove(z_file)
 
-          while True:
-              nested_zips = []
-              for root, dirs, files in os.walk(temp_dir):
-                  for file in files:
-                      if file.endswith('.zip'):
-                          nested_zips.append(os.path.join(root, file))
-              if not nested_zips:
-                  break
-              for n_zip in nested_zips:
-                  try:
-                      with zipfile.ZipFile(n_zip, 'r') as z_ref:
-                          z_ref.extractall(os.path.dirname(n_zip))
-                      os.remove(n_zip)
-                  except Exception:
-                      pass
-
-          image_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg')
-          for root, dirs, files in os.walk(temp_dir):
-              for file in files:
-                  if file.lower().endswith(image_extensions):
-                      src_path = os.path.join(root, file)
-                      clean_name = hash_pattern.sub('', file)
-                      dest_path = os.path.join(media_dir, clean_name)
-                      shutil.copy(src_path, dest_path)
-
-          target_date_dir = os.path.join(posts_dir, month_str)
-          os.makedirs(target_date_dir, exist_ok=True)
-
-          for root, dirs, files in os.walk(temp_dir):
-              for file in files:
-                  if file.endswith('.html'):
-                      file_path = os.path.join(root, file)
+              while True:
+                  nested_zips = []
+                  for root, dirs, files in os.walk(temp_dir):
+                      for file in files:
+                          if file.endswith('.zip'):
+                              nested_zips.append(os.path.join(root, file))
+                  if not nested_zips:
+                      break
+                  for n_zip in nested_zips:
                       try:
-                          with open(file_path, 'r', encoding='utf-8') as f:
-                              raw_html = f.read()
-                          
-                          title_match = re.search(r'<title>(.*?)</title>', raw_html, re.IGNORECASE)
-                          title = hash_pattern.sub('', title_match.group(1)).strip() if title_match else file.replace('.html', '')
-
-                          processed_body = transform_content(raw_html, month_str)
-                          final_html = render_template(title, processed_body)
-
-                          rel_sub_path = os.path.relpath(root, temp_dir)
-                          dest_sub_dir = os.path.join(target_date_dir, rel_sub_path) if rel_sub_path != '.' else target_date_dir
-                          os.makedirs(dest_sub_dir, exist_ok=True)
-                          
-                          dest_file_path = os.path.join(dest_sub_dir, hash_pattern.sub('', file))
-                          with open(dest_file_path, 'w', encoding='utf-8') as f:
-                              f.write(final_html)
+                          with zipfile.ZipFile(n_zip, 'r') as z_ref:
+                              z_ref.extractall(os.path.dirname(n_zip))
+                          os.remove(n_zip)
                       except Exception:
                           pass
+
+              image_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg')
+              for root, dirs, files in os.walk(temp_dir):
+                  for file in files:
+                      if file.lower().endswith(image_extensions):
+                          src_path = os.path.join(root, file)
+                          clean_name = hash_pattern.sub('', file)
+                          dest_path = os.path.join(media_dir, clean_name)
+                          shutil.copy(src_path, dest_path)
+
+              target_date_dir = os.path.join(posts_dir, month_str)
+              os.makedirs(target_date_dir, exist_ok=True)
+
+              for root, dirs, files in os.walk(temp_dir):
+                  for file in files:
+                      if file.endswith('.html'):
+                          file_path = os.path.join(root, file)
+                          try:
+                              with open(file_path, 'r', encoding='utf-8') as f:
+                                  raw_html = f.read()
+                              
+                              title_match = re.search(r'<title>(.*?)</title>', raw_html, re.IGNORECASE)
+                              title = hash_pattern.sub('', title_match.group(1)).strip() if title_match else file.replace('.html', '')
+
+                              processed_body = transform_content(raw_html, month_str)
+                              final_html = render_template(title, processed_body)
+
+                              rel_sub_path = os.path.relpath(root, temp_dir)
+                              dest_sub_dir = os.path.join(target_date_dir, rel_sub_path) if rel_sub_path != '.' else target_date_dir
+                              os.makedirs(dest_sub_dir, exist_ok=True)
+                              
+                              dest_file_path = os.path.join(dest_sub_dir, hash_pattern.sub('', file))
+                              with open(dest_file_path, 'w', encoding='utf-8') as f:
+                                  f.write(final_html)
+                          except Exception:
+                              pass
 
           if os.path.exists(temp_dir):
               shutil.rmtree(temp_dir)
@@ -450,7 +448,7 @@ jobs:
 
           with open('index.html', 'w', encoding='utf-8') as f:
               f.write(index_content)
-          print("Successfully built with recursive ZIP extraction and media organization!")
+          print("Successfully executed build process.")
           EOF
 
       - name: Commit and push changes back to repository
@@ -458,7 +456,7 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff --staged --quiet || git commit -m "Sync: recursive zip extraction, organize media, and update posts/index"
+          git diff --staged --quiet || git commit -m "Sync: handle missing zip gracefully and update posts/index"
           git push origin main
 
       - name: Setup Pages
@@ -469,7 +467,6 @@ jobs:
         with:
           path: '.'
 
-  # 追加：アップロードした成果物をGitHub Pagesにデプロイするジョブ
   deploy:
     needs: build
     runs-on: ubuntu-latest
