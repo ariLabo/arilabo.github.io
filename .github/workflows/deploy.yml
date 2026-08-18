@@ -187,7 +187,7 @@ jobs:
                   src = img.get('src')
                   if src:
                       clean_src = hash_pattern.sub('', src).split('/')[-1]
-                      img['src'] = f"../../media/{month_str}/{clean_src}"
+                      img['src'] = f"../../Media/{month_str}/{clean_src}"
 
               for pre_tag in list(soup.find_all('pre')):
                   if pre_tag.find_parent('details', class_='code-fold'):
