@@ -186,7 +186,9 @@ jobs:
                   src = img.get('src')
                   if src:
                       clean_src = hash_pattern.sub('', src).split('/')[-1]
-                      correct_path = f"../../Media/{month_str}/{clean_src}"
+                      
+                      # 階層の深さに合わせて修正（Posts/年月/サブフォルダ/ の構成を想定して ../../../ に統一）
+                      correct_path = f"../../../Media/{month_str}/{clean_src}"
                       img['src'] = correct_path
                       
                       parent_a = img.find_parent('a')
@@ -238,7 +240,7 @@ jobs:
                       thumb_src = ""
                       if img_tag and img_tag.get('src'):
                           clean_thumb = hash_pattern.sub('', img_tag['src']).split('/')[-1]
-                          thumb_src = f"../../Media/{month_str}/{clean_thumb}"
+                          thumb_src = f"../../../Media/{month_str}/{clean_thumb}"
 
                       new_a = soup.new_tag('a', href=href, target='_blank', class_='simple-bookmark')
                       if thumb_src:
