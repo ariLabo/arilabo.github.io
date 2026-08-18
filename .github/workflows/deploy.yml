@@ -187,8 +187,13 @@ jobs:
                   if src:
                       clean_src = hash_pattern.sub('', src).split('/')[-1]
                       
-                      # 階層の深さに合わせて修正（Posts/年月/サブフォルダ/ の構成を想定して ../../../ に統一）
-                      correct_path = f"../../../Media/{month_str}/{clean_src}"
+                      # Mediaフォルダへの正しい相対パスを組み立て
+                      sub_folder = os.path.basename(os.path.dirname(src))
+                      if sub_folder and sub_folder != month_str:
+                          correct_path = f"../../../Media/{month_str}/{sub_folder}/{clean_src}"
+                      else:
+                          correct_path = f"../../../Media/{month_str}/{clean_src}"
+                          
                       img['src'] = correct_path
                       
                       parent_a = img.find_parent('a')
@@ -300,7 +305,16 @@ jobs:
                       if file.lower().endswith(image_extensions):
                           src_path = os.path.join(root, file)
                           clean_name = hash_pattern.sub('', file)
-                          dest_path = os.path.join(media_dir, clean_name)
+                          
+                          # サブフォルダ構造がある場合はそれに合わせてMedia内にもサブフォルダを再現してコピー
+                          rel_media_sub = os.path.relpath(root, temp_dir)
+                          if rel_media_sub != '.':
+                              dest_media_sub = os.path.join(media_dir, rel_media_sub)
+                              os.makedirs(dest_media_sub, exist_ok=True)
+                              dest_path = os.path.join(dest_media_sub, clean_name)
+                          else:
+                              dest_path = os.path.join(media_dir, clean_name)
+                              
                           shutil.copy(src_path, dest_path)
 
               target_date_dir = os.path.join(posts_dir, month_str)
@@ -458,7 +472,7 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff --staged --quiet || git commit -m "Sync: handle missing zip gracefully and update posts/index"
+          git diff --staged --quiet || git commit -m "Fix image click href link path to point to Media directory"
           git push origin main
 
       - name: Setup Pages
