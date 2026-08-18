@@ -11,8 +11,13 @@ permissions:
   pages: write
   id-token: write
 
+# 複数同時実行を防ぐ設定（デプロイメントの競合を防ぐため推奨）
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -258,14 +263,12 @@ jobs:
           temp_dir = 'temp_extracted'
           os.makedirs(temp_dir, exist_ok=True)
 
-          # ルートディレクトリにあるZIPファイルをすべて一時フォルダに展開し、元ZIPは削除
           zip_files = [f for f in os.listdir('.') if f.endswith('.zip')]
           for z_file in zip_files:
               with zipfile.ZipFile(z_file, 'r') as zip_ref:
                   zip_ref.extractall(temp_dir)
               os.remove(z_file)
 
-          # 【追加】展開された中にさらにZIPファイル（子ZIP）が含まれている場合を考慮し、再帰的にすべて解凍する
           while True:
               nested_zips = []
               for root, dirs, files in os.walk(temp_dir):
@@ -282,7 +285,6 @@ jobs:
                   except Exception:
                       pass
 
-          # 1. すべての画像・アセットファイルを media/YYYYMM/ に集約
           image_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg')
           for root, dirs, files in os.walk(temp_dir):
               for file in files:
@@ -292,7 +294,6 @@ jobs:
                       dest_path = os.path.join(media_dir, clean_name)
                       shutil.copy(src_path, dest_path)
 
-          # 2. HTMLファイルを処理して Posts/YYYYMM/ に配置
           target_date_dir = os.path.join(posts_dir, month_str)
           os.makedirs(target_date_dir, exist_ok=True)
 
@@ -323,7 +324,6 @@ jobs:
           if os.path.exists(temp_dir):
               shutil.rmtree(temp_dir)
 
-          # 📚 index.html の生成処理
           article_data = []
           all_tags = set()
 
@@ -459,3 +459,15 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: '.'
+
+  # 追加：アップロードした成果物をGitHub Pagesにデプロイするジョブ
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
